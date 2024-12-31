@@ -296,7 +296,7 @@ def main():
                 st.session_state.logged_in = True
                 st.session_state.username = username
                 st.session_state.department = user[2]
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Invalid credentials")
 
@@ -308,7 +308,7 @@ def main():
         if st.sidebar.button("Logout"):
             st.session_state.logged_in = False
             st.session_state.username = None
-            st.experimental_rerun()
+            st.rerun()
 
         # Tabs for different functionalities
         tab1, tab2 = st.tabs(["Alert Generation", "Check Alerts"])
