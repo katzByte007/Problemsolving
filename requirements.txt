@@ -4,3 +4,5 @@ requests
 gtts
 torch
 whisper
+ollama
+numpy
