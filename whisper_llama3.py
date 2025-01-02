@@ -1,4 +1,3 @@
-#streamlit.py
 import streamlit as st
 import sqlite3
 import hashlib
@@ -11,16 +10,12 @@ from PIL import Image
 import io
 import re
 from gtts import gTTS
-import streamlit as st
-import sqlite3
-import hashlib
-import base64
-import numpy as np
-from PIL import Image
-import io
 import requests
-from gtts import gTTS
 import json
+from streamlit_webrtc import webrtc_streamer
+import av
+
+
 
 # Database Initialization
 def init_database():
@@ -111,7 +106,20 @@ def create_alert(department, priority, description):
     
     finally:
         conn.close()
-def img2txt(input_text, input_image):
+        
+
+def capture_camera():
+    """Handle camera capture using webrtc"""
+    webrtc_ctx = webrtc_streamer(
+        key="camera",
+        video_frame_callback=None,
+        rtc_configuration={
+            "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+        }
+    )
+    return webrtc_ctx
+
+def img2txt(input_text, input_image, additional_context=""):
     try:
         buffered = io.BytesIO()
         input_image.save(buffered, format="PNG")
@@ -126,6 +134,9 @@ def img2txt(input_text, input_image):
             return "Error: Unable to process image"
 
         image_description = response.json()[0]['generated_text']
+
+        # Combine all text inputs
+        combined_text = f"{image_description} {input_text} {additional_context}".strip()
 
         # Determine department and priority based on description
         keywords = {
@@ -142,11 +153,11 @@ def img2txt(input_text, input_image):
         
         department_match = ('Missing Item Department', 4)  # Default
         for keyword, (dept, pri) in keywords.items():
-            if keyword in (image_description + input_text).lower():
+            if keyword in combined_text.lower():
                 department_match = (dept, pri)
                 break
 
-        description = f"{image_description} {input_text}".strip()[:200]
+        description = f"{combined_text}"[:500]
         create_alert(department_match[0], department_match[1], description)
         
         return description
@@ -272,17 +283,11 @@ def main():
     if 'HUGGINGFACE_TOKEN' not in st.secrets:
         st.secrets['HUGGINGFACE_TOKEN'] = "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"
 
-    
     # Initialize database
     init_database()
 
     # Page title
     st.title("Multimodal Alert System")
-
-    # Session state for login
-    if 'logged_in' not in st.session_state:
-        st.session_state.logged_in = False
-        st.session_state.username = None
 
     # Login Section
     if not st.session_state.logged_in:
@@ -304,44 +309,63 @@ def main():
     if st.session_state.logged_in:
         st.sidebar.success(f"Logged in as: {st.session_state.username}")
         
-        # Logout button
         if st.sidebar.button("Logout"):
             st.session_state.logged_in = False
             st.session_state.username = None
             st.rerun()
 
-        # Tabs for different functionalities
         tab1, tab2 = st.tabs(["Alert Generation", "Check Alerts"])
 
         with tab1:
             st.subheader("Generate Alert")
             
-            # Audio Input
-            audio_file = st.file_uploader("Upload Audio", type=['wav', 'mp3'])
-            
             # Image Input
-            image_file = st.file_uploader("Upload Image", type=['png', 'jpg', 'jpeg'])
+            st.markdown("### Upload Image")
+            image_file = st.file_uploader(
+                "Take a photo or choose from gallery", 
+                type=['png', 'jpg', 'jpeg'],
+                accept_multiple_files=False,
+                help="Select image from gallery or take a photo"
+            )
             
-            if st.button("Process Inputs"):
-                # Process audio if uploaded
+            # Audio Input
+            st.markdown("### Upload Audio")
+            audio_file = st.file_uploader(
+                "Record audio or choose from gallery",
+                type=['wav', 'mp3'],
+                accept_multiple_files=False,
+                help="Select audio from device or record"
+            )
+            
+            # Additional Context
+            additional_context = st.text_area(
+                "Additional Context",
+                placeholder="Add location, address, or any other relevant details...",
+                help="This information will be included in the alert description"
+            )
+            
+            if st.button("Process Inputs", type="primary"):
                 speech_text = ""
                 if audio_file:
                     speech_text = transcribe_audio(audio_file.read())
                     st.write("Speech to Text:", speech_text)
                 
-                # Process image if uploaded
                 if image_file:
                     image = Image.open(image_file)
                     
-                    # Generate description and alert
-                    alert_description = img2txt(speech_text, image)
+                    # Generate description and alert with additional context
+                    alert_description = img2txt(
+                        speech_text, 
+                        image,
+                        additional_context
+                    )
                     st.write("Alert Description:", alert_description)
                     
                     # Text to Speech
                     audio_output = text_to_speech(alert_description)
                     if audio_output:
                         st.audio(audio_output)
-
+                        
         with tab2:
             st.subheader("Department Alerts")
             
