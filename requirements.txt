@@ -6,3 +6,5 @@ whisper
 torch
 numpy
 ollama
+streamlit-webrtc
+av
