@@ -19,8 +19,8 @@ import av
 
 # Database Initialization
 def init_database():
-    """Initialize SQLite database for users and alerts"""
-    conn = sqlite3.connect('user1_database.db')
+    """Initialize SQLite database for users and alerts with media storage"""
+    conn = sqlite3.connect('user4_database.db')
     cursor = conn.cursor()
     
     # Create users table
@@ -32,7 +32,7 @@ def init_database():
         department TEXT
     )''')
     
-    # Create alerts table
+    # Modified alerts table to include media storage
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS alerts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,10 +40,12 @@ def init_database():
         department TEXT,
         priority INTEGER,
         description TEXT,
-        status TEXT DEFAULT 'UNREAD'
+        status TEXT DEFAULT 'UNREAD',
+        image_data BLOB,
+        audio_data BLOB
     )''')
     
-    # Add default users
+    # Add default users (same as before)
     default_users = [
         ('fire_head', 'firepass', 'head', 'Fire Department'),
         ('health_head', 'healthpass', 'head', 'Health Care Department'),
@@ -62,7 +64,7 @@ def init_database():
 # Authentication Function
 def authenticate_user(username, password):
     """Authenticate user credentials"""
-    conn = sqlite3.connect('user1_database.db')
+    conn = sqlite3.connect('user4_database.db')
     cursor = conn.cursor()
     
     # Hash the password
@@ -81,33 +83,25 @@ def authenticate_user(username, password):
     return user
 
 # Create Alert Function
-def create_alert(department, priority, description):
-    """Create an alert in the database"""
-    conn = sqlite3.connect('user1_database.db')
+def create_alert(department, priority, description, image_data=None, audio_data=None):
+    """Create an alert in the database with media data"""
+    conn = sqlite3.connect('user4_database.db')
     cursor = conn.cursor()
     
     try:
-        # Debug print to verify alert creation
-        print(f"Creating alert - Department: {department}, Priority: {priority}, Description: {description}")
-        
         cursor.execute("""
-            INSERT INTO alerts (department, priority, description, status) 
-            VALUES (?, ?, ?, 'UNREAD')
-        """, (department, priority, description))
+            INSERT INTO alerts (department, priority, description, status, image_data, audio_data) 
+            VALUES (?, ?, ?, 'UNREAD', ?, ?)
+        """, (department, priority, description, image_data, audio_data))
         
         conn.commit()
         
-        # Debug print to confirm insertion
-        print("Alert created successfully")
-    
     except Exception as e:
         print(f"Error creating alert: {e}")
         conn.rollback()
     
     finally:
         conn.close()
-        
-
 def capture_camera():
     """Handle camera capture using webrtc"""
     webrtc_ctx = webrtc_streamer(
@@ -119,10 +113,12 @@ def capture_camera():
     )
     return webrtc_ctx
 
-def img2txt(input_text, input_image, additional_context=""):
+def img2txt(input_text, input_image, audio_data=None, additional_context=""):
     try:
+        # Convert image to bytes for storage
         buffered = io.BytesIO()
         input_image.save(buffered, format="PNG")
+        img_data = buffered.getvalue()
         img_str = base64.b64encode(buffered.getvalue()).decode()
 
         API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
@@ -134,11 +130,8 @@ def img2txt(input_text, input_image, additional_context=""):
             return "Error: Unable to process image"
 
         image_description = response.json()[0]['generated_text']
-
-        # Combine all text inputs
         combined_text = f"{image_description} {input_text} {additional_context}".strip()
 
-        # Determine department and priority based on description
         keywords = {
             'pipe': ('Equipment Damage Department', 3),
             'leak': ('Equipment Damage Department', 3),
@@ -158,13 +151,14 @@ def img2txt(input_text, input_image, additional_context=""):
                 break
 
         description = f"{combined_text}"[:500]
-        create_alert(department_match[0], department_match[1], description)
+        create_alert(department_match[0], department_match[1], description, img_data, audio_data)
         
         return description
 
     except Exception as e:
         st.error(f"Error in img2txt: {str(e)}")
         return f"Error processing image: {str(e)}"
+
     
 def transcribe_audio(audio_bytes):
     """Transcribe audio using Hugging Face's Whisper API"""
@@ -202,24 +196,22 @@ def text_to_speech(text, file_path="output_speech.mp3"):
 
 
 def check_alerts(username):
-    """Retrieve and format alerts ONLY for the specific user's department"""
-    conn = sqlite3.connect('user1_database.db')
+    """Retrieve and format alerts with media display"""
+    conn = sqlite3.connect('user4_database.db')
     cursor = conn.cursor()
 
     try:
-        # Get user's department
         cursor.execute("SELECT department FROM users WHERE username = ?", (username,))
         user_result = cursor.fetchone()
         
         if not user_result:
             conn.close()
-            return "Error: User department not found."
+            return "Error: User department not found.", []
 
         user_department = user_result[0]
 
-        # Fetch ONLY alerts for THIS specific department
         cursor.execute("""
-            SELECT id, timestamp, description, priority, status
+            SELECT id, timestamp, description, priority, status, image_data, audio_data
             FROM alerts
             WHERE department = ?
             ORDER BY timestamp DESC
@@ -229,49 +221,59 @@ def check_alerts(username):
         conn.close()
 
         if not alerts:
-            return f"No alerts found for {user_department}."
+            return f"No alerts found for {user_department}.", []
 
-        # Separate recent and historical alerts
-        recent_alerts = [alert for alert in alerts if alert[4] == 'UNREAD']
-        historical_alerts = [alert for alert in alerts if alert[4] == 'READ']
-
-        # Format the output with improved readability
+        # Format alerts with media handling
+        formatted_alerts = []
         output = f"🚨 {user_department.upper()} ALERTS 🚨\n\n"
         
-        if recent_alerts:
-            output += "🔴 URGENT ALERTS:\n"
-            for _, timestamp, description, priority, status in recent_alerts:
-                output += f"• {timestamp}\n  {description}\n\n"
-        
-        if historical_alerts:
-            output += "🔵 HISTORICAL ALERTS:\n"
-            for _, timestamp, description, priority, status in historical_alerts:
-                output += f"• {timestamp}\n  {description}\n\n"
+        for alert in alerts:
+            alert_id, timestamp, description, priority, status, image_data, audio_data = alert
+            
+            # Create dictionary for each alert with all necessary data
+            alert_dict = {
+                'id': alert_id,
+                'timestamp': timestamp,
+                'description': description,
+                'priority': priority,
+                'status': status,
+                'image_data': image_data,
+                'audio_data': audio_data
+            }
+            formatted_alerts.append(alert_dict)
+            
+            # Add to text output
+            status_icon = "🔴" if status == "UNREAD" else "🔵"
+            output += f"{status_icon} {timestamp}\n{description}\n\n"
 
-        return output
+        return output, formatted_alerts
 
     except Exception as e:
-        return f"Error retrieving alerts: {str(e)}"
+        return f"Error retrieving alerts: {str(e)}", []
 def clear_department_alerts(username):
     """Completely clear all alerts for a specific department"""
     conn = sqlite3.connect('user1_database.db')
     cursor = conn.cursor()
 
-    # Get user's department
-    cursor.execute("SELECT department FROM users WHERE username = ?", (username,))
-    department = cursor.fetchone()[0]
+    try:
+        # Get user's department
+        cursor.execute("SELECT department FROM users WHERE username = ?", (username,))
+        department = cursor.fetchone()[0]
 
-    # Completely remove all alerts for the department
-    cursor.execute("DELETE FROM alerts WHERE department = ?", (department,))
-    
-    conn.commit()
-    rows_deleted = cursor.rowcount
-    conn.close()
+        # Completely remove all alerts for the department
+        cursor.execute("DELETE FROM alerts WHERE department = ?", (department,))
+        
+        conn.commit()
+        rows_deleted = cursor.rowcount
+        
+        return rows_deleted, department
 
-    return rows_deleted, department
+    except Exception as e:
+        print(f"Error clearing alerts: {e}")
+        return 0, None
 # Main Streamlit App
 def main():
-    # Initialize session state variables
+    # Initialize session state and database (same as before)
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
     if 'username' not in st.session_state:
@@ -279,17 +281,14 @@ def main():
     if 'department' not in st.session_state:
         st.session_state['department'] = None
 
-    # Store Hugging Face token in streamlit secrets
     if 'HUGGINGFACE_TOKEN' not in st.secrets:
         st.secrets['HUGGINGFACE_TOKEN'] = "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"
 
-    # Initialize database
     init_database()
 
-    # Page title
     st.title("Multimodal Alert System")
 
-    # Login Section
+    # Login section (same as before)
     if not st.session_state.logged_in:
         st.subheader("Login")
         username = st.text_input("Username")
@@ -317,6 +316,7 @@ def main():
         tab1, tab2 = st.tabs(["Alert Generation", "Check Alerts"])
 
         with tab1:
+            # [Alert Generation tab code remains the same]
             st.subheader("Generate Alert")
             
             # Image Input
@@ -346,81 +346,78 @@ def main():
             
             if st.button("Process Inputs", type="primary"):
                 speech_text = ""
+                audio_data = None
                 if audio_file:
-                    speech_text = transcribe_audio(audio_file.read())
+                    audio_data = audio_file.read()
+                    speech_text = transcribe_audio(audio_data)
                     st.write("Speech to Text:", speech_text)
                 
                 if image_file:
                     image = Image.open(image_file)
+                    st.image(image, caption="Uploaded Image", use_column_width=True)
                     
-                    # Generate description and alert with additional context
                     alert_description = img2txt(
                         speech_text, 
                         image,
+                        audio_data,
                         additional_context
                     )
                     st.write("Alert Description:", alert_description)
                     
-                    # Text to Speech
-                    audio_output = text_to_speech(alert_description)
-                    if audio_output:
-                        st.audio(audio_output)
-                        
+                    if audio_data:
+                        st.audio(audio_data)
+
         with tab2:
             st.subheader("Department Alerts")
             
-            # Style the alerts container
-            st.markdown("""
-            <style>
-                .alert-container {
-                    background-color: #000000; /* Black background */
-                    color: #ffffff; /* White text */
-                    border-radius: 10px;
-                    padding: 20px;
-                    margin-bottom: 20px;
-                }
-                .urgent-alerts {
-                    color: #ff4b4b; /* Red color for urgent alerts */
-                    font-weight: bold;
-                }
-                .historical-alerts {
-                    color: #4b69ff; /* Blue color for historical alerts */
-                }
-            </style>
-            """, unsafe_allow_html=True)
-            
-            # Alerts container
-            alerts_container = st.container()
-            
-            # Retrieve Alerts Button
+            # Create two columns for buttons
             col1, col2 = st.columns(2)
             
+            # Retrieve Alerts button in first column
             with col1:
-                if st.button("Retrieve Alerts", key="retrieve_alerts"):
-                    alerts = check_alerts(st.session_state.username)
-                    with alerts_container:
-                        st.markdown(f'<div class="alert-container">{alerts}</div>', unsafe_allow_html=True)
+                retrieve_button = st.button("Retrieve Alerts", key="retrieve_alerts")
             
-            # Clear Alerts Button
+            # Clear Alerts button and confirmation in second column
             with col2:
                 clear_confirmation = st.checkbox("Confirm Alert Deletion", key="clear_confirm")
-                
                 if clear_confirmation:
                     if st.button("Clear All Department Alerts", type="primary", key="clear_alerts"):
-                        try:
-                            # Perform deletion
-                            rows_deleted, department = clear_department_alerts(st.session_state.username)
-                            
-                            # Immediate feedback
+                        rows_deleted, department = clear_department_alerts(st.session_state.username)
+                        if rows_deleted > 0:
                             st.success(f"Successfully cleared {rows_deleted} alerts for {department}.")
-                            
-                            # Update alerts view
-                            alerts = check_alerts(st.session_state.username)
-                            with alerts_container:
-                                st.markdown(f'<div class="alert-container">{alerts}</div>', unsafe_allow_html=True)
+                        else:
+                            st.info(f"No alerts to clear for {department}.")
+                        # Force refresh of alerts display
+                        retrieve_button = True
+
+            # Display alerts if retrieve button is clicked
+            if retrieve_button:
+                alerts_text, formatted_alerts = check_alerts(st.session_state.username)
+                
+                if not formatted_alerts:
+                    st.info("No alerts found for your department.")
+                else:
+                    for alert in formatted_alerts:
+                        st.markdown(f"### Alert {alert['id']} - {alert['timestamp']}")
+                        st.write(alert['description'])
                         
-                        except Exception as e:
-                            st.error(f"Error clearing alerts: {str(e)}")
+                        # Display image if available
+                        if alert['image_data']:
+                            try:
+                                image = Image.open(io.BytesIO(alert['image_data']))
+                                st.image(image, caption=f"Alert {alert['id']} Image", use_column_width=True)
+                            except Exception as e:
+                                st.error(f"Error displaying image: {e}")
+                        
+                        # Display audio if available
+                        if alert['audio_data']:
+                            try:
+                                st.audio(alert['audio_data'])
+                            except Exception as e:
+                                st.error(f"Error playing audio: {e}")
+                        
+                        st.markdown("---")
+
 # Run the app
 if __name__ == "__main__":
     main()
