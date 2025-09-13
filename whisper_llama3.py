@@ -121,7 +121,7 @@ def img2txt(input_text, input_image, audio_data=None, additional_context=""):
         img_data = buffered.getvalue()
         img_str = base64.b64encode(buffered.getvalue()).decode()
 
-        API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
+        API_URL = "https://huggingface.co/Salesforce/blip-image-captioning-base"
         headers = {"Authorization": f"Bearer {st.secrets['HUGGINGFACE_TOKEN']}"}
         response = requests.post(API_URL, headers=headers, json={"inputs": {"image": img_str}})
         
@@ -163,7 +163,7 @@ def img2txt(input_text, input_image, audio_data=None, additional_context=""):
 def transcribe_audio(audio_bytes):
     """Transcribe audio using Hugging Face's Whisper API"""
     try:
-        API_URL = "https://api-inference.huggingface.co/models/openai/whisper-large-v3"
+        API_URL = "https://huggingface.co/openai/whisper-large-v3"
         headers = {
             "Authorization": f"Bearer {st.secrets['HUGGINGFACE_TOKEN']}"
         }
@@ -420,4 +420,5 @@ def main():
 # Run the app
 if __name__ == "__main__":
     main()
+
 
