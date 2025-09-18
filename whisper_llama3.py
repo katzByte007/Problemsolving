@@ -101,16 +101,6 @@ def create_alert(department, priority, description, image_data=None, audio_data=
     
     finally:
         conn.close()
-def capture_camera():
-    """Handle camera capture using webrtc"""
-    webrtc_ctx = webrtc_streamer(
-        key="camera",
-        video_frame_callback=None,
-        rtc_configuration={
-            "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
-        }
-    )
-    return webrtc_ctx
 
 def compress_image(image, max_size=(800, 800), quality=85):
     """Compress/resize image to reduce file size"""
@@ -128,6 +118,47 @@ def compress_image(image, max_size=(800, 800), quality=85):
     
     return Image.open(buffered)
 
+def try_image_captioning_models(image_bytes):
+    """Try multiple Hugging Face models for image captioning"""
+    models_to_try = [
+        "Salesforce/blip-image-captioning-base",
+        "Salesforce/blip-image-captioning-large",
+        "nlpconnect/vit-gpt2-image-captioning",
+        "microsoft/git-base-coco",
+        "microsoft/git-large-coco",
+        "ydshieh/vit-gpt2-coco-en"
+    ]
+    
+    for model_name in models_to_try:
+        try:
+            API_URL = f"https://api-inference.huggingface.co/models/{model_name}"
+            headers = {
+                "Authorization": f"Bearer {st.secrets['HUGGINGFACE_TOKEN']}"
+            }
+            
+            st.info(f"Trying model: {model_name}")
+            
+            response = requests.post(API_URL, headers=headers, data=image_bytes, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if isinstance(result, list) and len(result) > 0:
+                    if isinstance(result[0], dict) and 'generated_text' in result[0]:
+                        return result[0]['generated_text']
+                    else:
+                        return str(result[0])
+            
+            # If model is loading, wait and retry
+            elif response.status_code == 503:
+                st.warning(f"Model {model_name} is loading, trying next model...")
+                continue
+                
+        except Exception as e:
+            st.warning(f"Error with model {model_name}: {str(e)}")
+            continue
+    
+    return None
+
 def img2txt(input_text, input_image, audio_data=None, additional_context=""):
     try:
         # Compress the image before processing
@@ -138,33 +169,16 @@ def img2txt(input_text, input_image, audio_data=None, additional_context=""):
         compressed_image.save(buffered, format="JPEG")
         img_data = buffered.getvalue()
         
-        # Convert image to bytes for API (not base64)
+        # Convert image to bytes for API
         buffered.seek(0)
         image_bytes = buffered.getvalue()
 
-        # Correct API endpoint for BLIP image captioning
-        API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
-        headers = {
-            "Authorization": f"Bearer {st.secrets['HUGGINGFACE_TOKEN']}"
-        }
+        # Try multiple image captioning models
+        image_description = try_image_captioning_models(image_bytes)
         
-        # Send the image bytes directly (not base64 encoded)
-        response = requests.post(API_URL, headers=headers, data=image_bytes)
-        
-        if response.status_code != 200:
-            st.error(f"API Error ({response.status_code}): {response.text}")
-            # Try to use a fallback method if API fails
-            return fallback_image_processing(input_text, additional_context)
-
-        # Parse the response
-        result = response.json()
-        if isinstance(result, list) and len(result) > 0:
-            if isinstance(result[0], dict) and 'generated_text' in result[0]:
-                image_description = result[0]['generated_text']
-            else:
-                image_description = str(result[0])
-        else:
-            image_description = "No description generated"
+        if image_description is None:
+            st.warning("All image captioning models failed. Using fallback description.")
+            return fallback_image_processing(input_text, additional_context, img_data, audio_data)
 
         combined_text = f"{image_description} {input_text} {additional_context}".strip()
 
@@ -193,10 +207,9 @@ def img2txt(input_text, input_image, audio_data=None, additional_context=""):
 
     except Exception as e:
         st.error(f"Error in img2txt: {str(e)}")
-        # Fallback if everything fails
-        return fallback_image_processing(input_text, additional_context)
+        return fallback_image_processing(input_text, additional_context, img_data, audio_data)
 
-def fallback_image_processing(input_text, additional_context):
+def fallback_image_processing(input_text, additional_context, img_data=None, audio_data=None):
     """Fallback method when Hugging Face API fails"""
     # Create a simple description based on available text
     combined_text = f"Image analysis unavailable. {input_text} {additional_context}".strip()
@@ -220,45 +233,45 @@ def fallback_image_processing(input_text, additional_context):
             break
 
     description = f"{combined_text}"[:500]
-    create_alert(department_match[0], department_match[1], description, None, None)
+    create_alert(department_match[0], department_match[1], description, img_data, audio_data)
     
     return description
-    
+
 def transcribe_audio(audio_bytes):
     """Transcribe audio using Hugging Face's Whisper API"""
     try:
-        # Correct API endpoint for Whisper
-        API_URL = "https://api-inference.huggingface.co/models/openai/whisper-large-v3"
-        headers = {
-            "Authorization": f"Bearer {st.secrets['HUGGINGFACE_TOKEN']}"
-        }
+        # Try multiple Whisper models
+        whisper_models = [
+            "openai/whisper-large-v3",
+            "openai/whisper-large-v2",
+            "openai/whisper-base"
+        ]
+        
+        for model_name in whisper_models:
+            try:
+                API_URL = f"https://api-inference.huggingface.co/models/{model_name}"
+                headers = {
+                    "Authorization": f"Bearer {st.secrets['HUGGINGFACE_TOKEN']}"
+                }
 
-        # Make API request with proper headers for audio
-        response = requests.post(
-            API_URL,
-            headers=headers,
-            data=audio_bytes
-        )
+                response = requests.post(API_URL, headers=headers, data=audio_bytes, timeout=30)
 
-        if response.status_code != 200:
-            return f"Error: API request failed with status {response.status_code}: {response.text}"
-
-        result = response.json()
-        return result.get('text', 'No transcription available')
+                if response.status_code == 200:
+                    result = response.json()
+                    return result.get('text', 'No transcription available')
+                
+                elif response.status_code == 503:
+                    st.warning(f"Whisper model {model_name} is loading, trying next...")
+                    continue
+                    
+            except Exception as e:
+                st.warning(f"Error with Whisper model {model_name}: {str(e)}")
+                continue
+        
+        return "Error: All audio transcription models failed"
 
     except Exception as e:
         return f"Error transcribing audio: {str(e)}"
-
-# Text to Speech Function
-def text_to_speech(text, file_path="output_speech.mp3"):
-    """Convert text to speech using gTTS"""
-    try:
-        tts = gTTS(text=text, lang='en', slow=False)
-        tts.save(file_path)
-        return file_path
-    except Exception as e:
-        return None
-
 
 def check_alerts(username):
     """Retrieve and format alerts with media display"""
@@ -315,9 +328,10 @@ def check_alerts(username):
 
     except Exception as e:
         return f"Error retrieving alerts: {str(e)}", []
+
 def clear_department_alerts(username):
     """Completely clear all alerts for a specific department"""
-    conn = sqlite3.connect('user4_database.db')  # Fixed database name
+    conn = sqlite3.connect('user4_database.db')
     cursor = conn.cursor()
 
     try:
@@ -342,9 +356,10 @@ def clear_department_alerts(username):
     except Exception as e:
         print(f"Error clearing alerts: {e}")
         return 0, None
+
 # Main Streamlit App
 def main():
-    # Initialize session state and database (same as before)
+    # Initialize session state and database
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
     if 'username' not in st.session_state:
@@ -352,13 +367,11 @@ def main():
     if 'department' not in st.session_state:
         st.session_state['department'] = None
 
-    
-
     init_database()
 
     st.title("Multimodal Alert System")
 
-    # Login section (same as before)
+    # Login section
     if not st.session_state.logged_in:
         st.subheader("Login")
         username = st.text_input("Username")
@@ -386,7 +399,6 @@ def main():
         tab1, tab2 = st.tabs(["Alert Generation", "Check Alerts"])
 
         with tab1:
-            # [Alert Generation tab code remains the same]
             st.subheader("Generate Alert")
             
             # Image Input
@@ -465,14 +477,11 @@ def main():
         with tab2:
             st.subheader("Department Alerts")
             
-            # Create two columns for buttons
             col1, col2 = st.columns(2)
             
-            # Retrieve Alerts button in first column
             with col1:
                 retrieve_button = st.button("Retrieve Alerts", key="retrieve_alerts")
             
-            # Clear Alerts button and confirmation in second column
             with col2:
                 clear_confirmation = st.checkbox("Confirm Alert Deletion", key="clear_confirm")
                 if clear_confirmation:
@@ -482,10 +491,8 @@ def main():
                             st.success(f"Successfully cleared {rows_deleted} alerts for {department}.")
                         else:
                             st.info(f"No alerts to clear for {department}.")
-                        # Force refresh of alerts display
                         st.rerun()
 
-            # Display alerts if retrieve button is clicked
             if retrieve_button:
                 alerts_text, formatted_alerts = check_alerts(st.session_state.username)
                 
@@ -496,7 +503,6 @@ def main():
                         st.markdown(f"### Alert {alert['id']} - {alert['timestamp']}")
                         st.write(alert['description'])
                         
-                        # Display image if available
                         if alert['image_data']:
                             try:
                                 image = Image.open(io.BytesIO(alert['image_data']))
@@ -504,7 +510,6 @@ def main():
                             except Exception as e:
                                 st.error(f"Error displaying image: {e}")
                         
-                        # Display audio if available
                         if alert['audio_data']:
                             try:
                                 st.audio(alert['audio_data'])
