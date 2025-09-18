@@ -14,7 +14,11 @@ import requests
 import json
 from streamlit_webrtc import webrtc_streamer
 import av
+import cv2
 
+
+# Hugging Face Token (fallback if not in secrets)
+HUGGINGFACE_TOKEN = "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"
 
 # Database Initialization
 def init_database():
@@ -118,27 +122,81 @@ def compress_image(image, max_size=(800, 800), quality=85):
     
     return Image.open(buffered)
 
+def get_huggingface_token():
+    """Get Hugging Face token from secrets or use fallback"""
+    try:
+        # First try to get from Streamlit secrets
+        token = st.secrets.get('HUGGINGFACE_TOKEN')
+        if token:
+            return token
+    except:
+        pass
+    
+    # If not in secrets or error, use the fallback token
+    return HUGGINGFACE_TOKEN
+
+def simple_image_analysis(image):
+    """Simple local image analysis as fallback"""
+    try:
+        # Convert to numpy array for basic analysis
+        img_array = np.array(image)
+        
+        # Basic color analysis
+        avg_color = np.mean(img_array, axis=(0, 1))
+        color_dominance = np.argmax(avg_color)
+        colors = ['Red', 'Green', 'Blue']
+        dominant_color = colors[color_dominance]
+        
+        # Basic shape/edge detection (simplified)
+        gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY) if len(img_array.shape) == 3 else img_array
+        edges = cv2.Canny(gray, 100, 200)
+        edge_density = np.sum(edges > 0) / (gray.shape[0] * gray.shape[1])
+        
+        # Generate simple description based on analysis
+        descriptions = []
+        
+        if edge_density > 0.1:
+            descriptions.append("image with complex details")
+        else:
+            descriptions.append("image with smooth surfaces")
+            
+        if dominant_color == 'Red':
+            descriptions.append("reddish tones")
+        elif dominant_color == 'Green':
+            descriptions.append("greenish tones")
+        else:
+            descriptions.append("bluish tones")
+            
+        if img_array.shape[0] > img_array.shape[1]:
+            descriptions.append("portrait orientation")
+        else:
+            descriptions.append("landscape orientation")
+            
+        return f"Image shows {' and '.join(descriptions)}"
+        
+    except Exception as e:
+        return "Unable to analyze image content"
+
 def try_image_captioning_models(image_bytes):
     """Try multiple Hugging Face models for image captioning"""
     models_to_try = [
         "Salesforce/blip-image-captioning-base",
         "Salesforce/blip-image-captioning-large",
-        "nlpconnect/vit-gpt2-image-captioning",
-        "microsoft/git-base-coco",
-        "microsoft/git-large-coco",
-        "ydshieh/vit-gpt2-coco-en"
+        "nlpconnect/vit-gpt2-image-captioning"
     ]
+    
+    token = get_huggingface_token()
     
     for model_name in models_to_try:
         try:
             API_URL = f"https://api-inference.huggingface.co/models/{model_name}"
             headers = {
-                "Authorization": f"Bearer {st.secrets['HUGGINGFACE_TOKEN']}"
+                "Authorization": f"Bearer {token}"
             }
             
             st.info(f"Trying model: {model_name}")
             
-            response = requests.post(API_URL, headers=headers, data=image_bytes, timeout=30)
+            response = requests.post(API_URL, headers=headers, data=image_bytes, timeout=15)
             
             if response.status_code == 200:
                 result = response.json()
@@ -150,8 +208,15 @@ def try_image_captioning_models(image_bytes):
             
             # If model is loading, wait and retry
             elif response.status_code == 503:
-                st.warning(f"Model {model_name} is loading, trying next model...")
-                continue
+                st.warning(f"Model {model_name} is loading...")
+                # Wait a bit and try again
+                import time
+                time.sleep(2)
+                response = requests.post(API_URL, headers=headers, data=image_bytes, timeout=15)
+                if response.status_code == 200:
+                    result = response.json()
+                    if isinstance(result, list) and len(result) > 0:
+                        return result[0].get('generated_text', 'Description generated')
                 
         except Exception as e:
             st.warning(f"Error with model {model_name}: {str(e)}")
@@ -169,17 +234,14 @@ def img2txt(input_text, input_image, audio_data=None, additional_context=""):
         compressed_image.save(buffered, format="JPEG")
         img_data = buffered.getvalue()
         
-        # Convert image to bytes for API
-        buffered.seek(0)
-        image_bytes = buffered.getvalue()
-
-        # Try multiple image captioning models
-        image_description = try_image_captioning_models(image_bytes)
+        # Try Hugging Face API first
+        image_description = try_image_captioning_models(img_data)
         
+        # If API fails, use local analysis
         if image_description is None:
-            st.warning("All image captioning models failed. Using fallback description.")
-            return fallback_image_processing(input_text, additional_context, img_data, audio_data)
-
+            st.warning("Hugging Face API unavailable. Using local image analysis.")
+            image_description = simple_image_analysis(compressed_image)
+        
         combined_text = f"{image_description} {input_text} {additional_context}".strip()
 
         keywords = {
@@ -191,7 +253,13 @@ def img2txt(input_text, input_image, audio_data=None, additional_context=""):
             'injury': ('Health Care Department', 2),
             'medical': ('Health Care Department', 2),
             'missing': ('Missing Item Department', 4),
-            'lost': ('Missing Item Department', 4)
+            'lost': ('Missing Item Department', 4),
+            'damage': ('Equipment Damage Department', 3),
+            'broken': ('Equipment Damage Department', 3),
+            'emergency': ('Fire Department', 1),
+            'accident': ('Health Care Department', 2),
+            'hurt': ('Health Care Department', 2),
+            'stolen': ('Missing Item Department', 4)
         }
         
         department_match = ('Missing Item Department', 4)  # Default
@@ -210,9 +278,11 @@ def img2txt(input_text, input_image, audio_data=None, additional_context=""):
         return fallback_image_processing(input_text, additional_context, img_data, audio_data)
 
 def fallback_image_processing(input_text, additional_context, img_data=None, audio_data=None):
-    """Fallback method when Hugging Face API fails"""
-    # Create a simple description based on available text
-    combined_text = f"Image analysis unavailable. {input_text} {additional_context}".strip()
+    """Fallback method when all image processing fails"""
+    combined_text = f"{input_text} {additional_context}".strip()
+    
+    if not combined_text:
+        combined_text = "Unspecified issue reported"
     
     keywords = {
         'pipe': ('Equipment Damage Department', 3),
@@ -223,7 +293,8 @@ def fallback_image_processing(input_text, additional_context, img_data=None, aud
         'injury': ('Health Care Department', 2),
         'medical': ('Health Care Department', 2),
         'missing': ('Missing Item Department', 4),
-        'lost': ('Missing Item Department', 4)
+        'lost': ('Missing Item Department', 4),
+        'damage': ('Equipment Damage Department', 3)
     }
     
     department_match = ('Missing Item Department', 4)  # Default
@@ -238,40 +309,24 @@ def fallback_image_processing(input_text, additional_context, img_data=None, aud
     return description
 
 def transcribe_audio(audio_bytes):
-    """Transcribe audio using Hugging Face's Whisper API"""
+    """Transcribe audio using Hugging Face's Whisper API with fallback"""
     try:
-        # Try multiple Whisper models
-        whisper_models = [
-            "openai/whisper-large-v3",
-            "openai/whisper-large-v2",
-            "openai/whisper-base"
-        ]
-        
-        for model_name in whisper_models:
-            try:
-                API_URL = f"https://api-inference.huggingface.co/models/{model_name}"
-                headers = {
-                    "Authorization": f"Bearer {st.secrets['HUGGINGFACE_TOKEN']}"
-                }
+        token = get_huggingface_token()
+        API_URL = "https://api-inference.huggingface.co/models/openai/whisper-base"
+        headers = {
+            "Authorization": f"Bearer {token}"
+        }
 
-                response = requests.post(API_URL, headers=headers, data=audio_bytes, timeout=30)
+        response = requests.post(API_URL, headers=headers, data=audio_bytes, timeout=15)
 
-                if response.status_code == 200:
-                    result = response.json()
-                    return result.get('text', 'No transcription available')
-                
-                elif response.status_code == 503:
-                    st.warning(f"Whisper model {model_name} is loading, trying next...")
-                    continue
-                    
-            except Exception as e:
-                st.warning(f"Error with Whisper model {model_name}: {str(e)}")
-                continue
-        
-        return "Error: All audio transcription models failed"
+        if response.status_code == 200:
+            result = response.json()
+            return result.get('text', 'Audio transcribed')
+        else:
+            return "Audio recording available (transcription failed)"
 
     except Exception as e:
-        return f"Error transcribing audio: {str(e)}"
+        return f"Audio recording available: {str(e)}"
 
 def check_alerts(username):
     """Retrieve and format alerts with media display"""
@@ -292,7 +347,7 @@ def check_alerts(username):
             SELECT id, timestamp, description, priority, status, image_data, audio_data
             FROM alerts
             WHERE department = ?
-            ORDER BY timestamp DESC
+            ORDER by timestamp DESC
         """, (user_department,))
 
         alerts = cursor.fetchall()
@@ -301,14 +356,12 @@ def check_alerts(username):
         if not alerts:
             return f"No alerts found for {user_department}.", []
 
-        # Format alerts with media handling
         formatted_alerts = []
         output = f"🚨 {user_department.upper()} ALERTS 🚨\n\n"
         
         for alert in alerts:
             alert_id, timestamp, description, priority, status, image_data, audio_data = alert
             
-            # Create dictionary for each alert with all necessary data
             alert_dict = {
                 'id': alert_id,
                 'timestamp': timestamp,
@@ -320,7 +373,6 @@ def check_alerts(username):
             }
             formatted_alerts.append(alert_dict)
             
-            # Add to text output
             status_icon = "🔴" if status == "UNREAD" else "🔵"
             output += f"{status_icon} {timestamp}\n{description}\n\n"
 
@@ -335,7 +387,6 @@ def clear_department_alerts(username):
     cursor = conn.cursor()
 
     try:
-        # Get user's department
         cursor.execute("SELECT department FROM users WHERE username = ?", (username,))
         user_result = cursor.fetchone()
         
@@ -345,7 +396,6 @@ def clear_department_alerts(username):
             
         department = user_result[0]
 
-        # Completely remove all alerts for the department
         cursor.execute("DELETE FROM alerts WHERE department = ?", (department,))
         
         conn.commit()
@@ -359,7 +409,6 @@ def clear_department_alerts(username):
 
 # Main Streamlit App
 def main():
-    # Initialize session state and database
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
     if 'username' not in st.session_state:
@@ -371,7 +420,6 @@ def main():
 
     st.title("Multimodal Alert System")
 
-    # Login section
     if not st.session_state.logged_in:
         st.subheader("Login")
         username = st.text_input("Username")
@@ -387,7 +435,6 @@ def main():
             else:
                 st.error("Invalid credentials")
 
-    # Main Interface after Login
     if st.session_state.logged_in:
         st.sidebar.success(f"Logged in as: {st.session_state.username}")
         
@@ -401,25 +448,20 @@ def main():
         with tab1:
             st.subheader("Generate Alert")
             
-            # Image Input
             st.markdown("### Upload Image")
             image_file = st.file_uploader(
                 "Take a photo or choose from gallery", 
                 type=['png', 'jpg', 'jpeg'],
-                accept_multiple_files=False,
                 help="Select image from gallery or take a photo"
             )
             
-            # Audio Input
             st.markdown("### Upload Audio")
             audio_file = st.file_uploader(
                 "Record audio or choose from gallery",
                 type=['wav', 'mp3'],
-                accept_multiple_files=False,
                 help="Select audio from device or record"
             )
             
-            # Additional Context
             additional_context = st.text_area(
                 "Additional Context",
                 placeholder="Add location, address, or any other relevant details...",
@@ -449,10 +491,8 @@ def main():
                     if audio_data:
                         st.audio(audio_data)
                 elif speech_text or additional_context:
-                    # Handle case where only text/audio is provided without image
                     description = f"{speech_text} {additional_context}".strip()
                     if description:
-                        # Determine department based on text content
                         keywords = {
                             'pipe': ('Equipment Damage Department', 3),
                             'leak': ('Equipment Damage Department', 3),
@@ -465,14 +505,14 @@ def main():
                             'lost': ('Missing Item Department', 4)
                         }
                         
-                        department_match = ('Missing Item Department', 4)  # Default
+                        department_match = ('Missing Item Department', 4)
                         for keyword, (dept, pri) in keywords.items():
                             if keyword in description.lower():
                                 department_match = (dept, pri)
                                 break
                         
                         create_alert(department_match[0], department_match[1], description, None, audio_data)
-                        st.write("Alert created based on text/audio input")
+                        st.success("Alert created based on text/audio input")
 
         with tab2:
             st.subheader("Department Alerts")
@@ -518,6 +558,5 @@ def main():
                         
                         st.markdown("---")
 
-# Run the app
 if __name__ == "__main__":
     main()
