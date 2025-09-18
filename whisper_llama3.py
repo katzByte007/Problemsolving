@@ -138,30 +138,31 @@ def img2txt(input_text, input_image, audio_data=None, additional_context=""):
         compressed_image.save(buffered, format="JPEG")
         img_data = buffered.getvalue()
         
-        # Convert image to base64 for API
+        # Convert image to bytes for API (not base64)
         buffered.seek(0)
-        img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        image_bytes = buffered.getvalue()
 
         # Correct API endpoint for BLIP image captioning
         API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
         headers = {
-            "Authorization": f"Bearer {st.secrets['HUGGINGFACE_TOKEN']}",
-            "Content-Type": "application/json"
+            "Authorization": f"Bearer {st.secrets['HUGGINGFACE_TOKEN']}"
         }
         
-        # Prepare the payload correctly
-        payload = {"inputs": img_str}
-        
-        response = requests.post(API_URL, headers=headers, json=payload)
+        # Send the image bytes directly (not base64 encoded)
+        response = requests.post(API_URL, headers=headers, data=image_bytes)
         
         if response.status_code != 200:
             st.error(f"API Error ({response.status_code}): {response.text}")
-            return "Error: Unable to process image"
+            # Try to use a fallback method if API fails
+            return fallback_image_processing(input_text, additional_context)
 
         # Parse the response
         result = response.json()
         if isinstance(result, list) and len(result) > 0:
-            image_description = result[0].get('generated_text', 'No description generated')
+            if isinstance(result[0], dict) and 'generated_text' in result[0]:
+                image_description = result[0]['generated_text']
+            else:
+                image_description = str(result[0])
         else:
             image_description = "No description generated"
 
@@ -192,8 +193,36 @@ def img2txt(input_text, input_image, audio_data=None, additional_context=""):
 
     except Exception as e:
         st.error(f"Error in img2txt: {str(e)}")
-        return f"Error processing image: {str(e)}"
+        # Fallback if everything fails
+        return fallback_image_processing(input_text, additional_context)
 
+def fallback_image_processing(input_text, additional_context):
+    """Fallback method when Hugging Face API fails"""
+    # Create a simple description based on available text
+    combined_text = f"Image analysis unavailable. {input_text} {additional_context}".strip()
+    
+    keywords = {
+        'pipe': ('Equipment Damage Department', 3),
+        'leak': ('Equipment Damage Department', 3),
+        'equipment': ('Equipment Damage Department', 3),
+        'fire': ('Fire Department', 1),
+        'smoke': ('Fire Department', 1),
+        'injury': ('Health Care Department', 2),
+        'medical': ('Health Care Department', 2),
+        'missing': ('Missing Item Department', 4),
+        'lost': ('Missing Item Department', 4)
+    }
+    
+    department_match = ('Missing Item Department', 4)  # Default
+    for keyword, (dept, pri) in keywords.items():
+        if keyword in combined_text.lower():
+            department_match = (dept, pri)
+            break
+
+    description = f"{combined_text}"[:500]
+    create_alert(department_match[0], department_match[1], description, None, None)
+    
+    return description
     
 def transcribe_audio(audio_bytes):
     """Transcribe audio using Hugging Face's Whisper API"""
@@ -407,6 +436,31 @@ def main():
                     
                     if audio_data:
                         st.audio(audio_data)
+                elif speech_text or additional_context:
+                    # Handle case where only text/audio is provided without image
+                    description = f"{speech_text} {additional_context}".strip()
+                    if description:
+                        # Determine department based on text content
+                        keywords = {
+                            'pipe': ('Equipment Damage Department', 3),
+                            'leak': ('Equipment Damage Department', 3),
+                            'equipment': ('Equipment Damage Department', 3),
+                            'fire': ('Fire Department', 1),
+                            'smoke': ('Fire Department', 1),
+                            'injury': ('Health Care Department', 2),
+                            'medical': ('Health Care Department', 2),
+                            'missing': ('Missing Item Department', 4),
+                            'lost': ('Missing Item Department', 4)
+                        }
+                        
+                        department_match = ('Missing Item Department', 4)  # Default
+                        for keyword, (dept, pri) in keywords.items():
+                            if keyword in description.lower():
+                                department_match = (dept, pri)
+                                break
+                        
+                        create_alert(department_match[0], department_match[1], description, None, audio_data)
+                        st.write("Alert created based on text/audio input")
 
         with tab2:
             st.subheader("Department Alerts")
