@@ -137,19 +137,34 @@ def img2txt(input_text, input_image, audio_data=None, additional_context=""):
         buffered = io.BytesIO()
         compressed_image.save(buffered, format="JPEG")
         img_data = buffered.getvalue()
-        img_str = base64.b64encode(img_data).decode()
-
-        API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
-        headers = {"Authorization": f"Bearer {st.secrets['HUGGINGFACE_TOKEN']}"}
         
-        # Send the base64 encoded image
-        response = requests.post(API_URL, headers=headers, json={"inputs": img_str})
+        # Convert image to base64 for API
+        buffered.seek(0)
+        img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+        # Correct API endpoint for BLIP image captioning
+        API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
+        headers = {
+            "Authorization": f"Bearer {st.secrets['HUGGINGFACE_TOKEN']}",
+            "Content-Type": "application/json"
+        }
+        
+        # Prepare the payload correctly
+        payload = {"inputs": img_str}
+        
+        response = requests.post(API_URL, headers=headers, json=payload)
         
         if response.status_code != 200:
-            st.error(f"API Error: {response.text}")
+            st.error(f"API Error ({response.status_code}): {response.text}")
             return "Error: Unable to process image"
 
-        image_description = response.json()[0]['generated_text']
+        # Parse the response
+        result = response.json()
+        if isinstance(result, list) and len(result) > 0:
+            image_description = result[0].get('generated_text', 'No description generated')
+        else:
+            image_description = "No description generated"
+
         combined_text = f"{image_description} {input_text} {additional_context}".strip()
 
         keywords = {
@@ -183,12 +198,13 @@ def img2txt(input_text, input_image, audio_data=None, additional_context=""):
 def transcribe_audio(audio_bytes):
     """Transcribe audio using Hugging Face's Whisper API"""
     try:
+        # Correct API endpoint for Whisper
         API_URL = "https://api-inference.huggingface.co/models/openai/whisper-large-v3"
         headers = {
             "Authorization": f"Bearer {st.secrets['HUGGINGFACE_TOKEN']}"
         }
 
-        # Make API request
+        # Make API request with proper headers for audio
         response = requests.post(
             API_URL,
             headers=headers,
@@ -196,10 +212,10 @@ def transcribe_audio(audio_bytes):
         )
 
         if response.status_code != 200:
-            return f"Error: API request failed with status {response.status_code}"
+            return f"Error: API request failed with status {response.status_code}: {response.text}"
 
         result = response.json()
-        return result.get('text', '')
+        return result.get('text', 'No transcription available')
 
     except Exception as e:
         return f"Error transcribing audio: {str(e)}"
