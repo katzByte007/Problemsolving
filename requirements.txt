@@ -8,3 +8,4 @@ numpy
 ollama
 streamlit-webrtc
 av
+opencv-python
