@@ -16,7 +16,6 @@ from streamlit_webrtc import webrtc_streamer
 import av
 
 
-
 # Database Initialization
 def init_database():
     """Initialize SQLite database for users and alerts with media storage"""
@@ -113,17 +112,38 @@ def capture_camera():
     )
     return webrtc_ctx
 
+def compress_image(image, max_size=(800, 800), quality=85):
+    """Compress/resize image to reduce file size"""
+    # Resize image if it's too large
+    image.thumbnail(max_size, Image.Resampling.LANCZOS)
+    
+    # Convert to JPEG format to reduce size
+    if image.mode != 'RGB':
+        image = image.convert('RGB')
+    
+    # Save to buffer with reduced quality
+    buffered = io.BytesIO()
+    image.save(buffered, format="JPEG", quality=quality, optimize=True)
+    buffered.seek(0)
+    
+    return Image.open(buffered)
+
 def img2txt(input_text, input_image, audio_data=None, additional_context=""):
     try:
-        # Convert image to bytes for storage
+        # Compress the image before processing
+        compressed_image = compress_image(input_image)
+        
+        # Convert compressed image to bytes for storage
         buffered = io.BytesIO()
-        input_image.save(buffered, format="PNG")
+        compressed_image.save(buffered, format="JPEG")
         img_data = buffered.getvalue()
-        img_str = base64.b64encode(buffered.getvalue()).decode()
+        img_str = base64.b64encode(img_data).decode()
 
-        API_URL = "https://huggingface.co/Salesforce/blip-image-captioning-base"
+        API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
         headers = {"Authorization": f"Bearer {st.secrets['HUGGINGFACE_TOKEN']}"}
-        response = requests.post(API_URL, headers=headers, json={"inputs": {"image": img_str}})
+        
+        # Send the base64 encoded image
+        response = requests.post(API_URL, headers=headers, json={"inputs": img_str})
         
         if response.status_code != 200:
             st.error(f"API Error: {response.text}")
@@ -163,7 +183,7 @@ def img2txt(input_text, input_image, audio_data=None, additional_context=""):
 def transcribe_audio(audio_bytes):
     """Transcribe audio using Hugging Face's Whisper API"""
     try:
-        API_URL = "https://huggingface.co/openai/whisper-large-v3"
+        API_URL = "https://api-inference.huggingface.co/models/openai/whisper-large-v3"
         headers = {
             "Authorization": f"Bearer {st.secrets['HUGGINGFACE_TOKEN']}"
         }
@@ -252,13 +272,19 @@ def check_alerts(username):
         return f"Error retrieving alerts: {str(e)}", []
 def clear_department_alerts(username):
     """Completely clear all alerts for a specific department"""
-    conn = sqlite3.connect('user1_database.db')
+    conn = sqlite3.connect('user4_database.db')  # Fixed database name
     cursor = conn.cursor()
 
     try:
         # Get user's department
         cursor.execute("SELECT department FROM users WHERE username = ?", (username,))
-        department = cursor.fetchone()[0]
+        user_result = cursor.fetchone()
+        
+        if not user_result:
+            conn.close()
+            return 0, None
+            
+        department = user_result[0]
 
         # Completely remove all alerts for the department
         cursor.execute("DELETE FROM alerts WHERE department = ?", (department,))
@@ -353,7 +379,7 @@ def main():
                 
                 if image_file:
                     image = Image.open(image_file)
-                    st.image(image, caption="Uploaded Image", use_column_width=True)
+                    st.image(image, caption="Uploaded Image", use_container_width=True)
                     
                     alert_description = img2txt(
                         speech_text, 
@@ -387,7 +413,7 @@ def main():
                         else:
                             st.info(f"No alerts to clear for {department}.")
                         # Force refresh of alerts display
-                        retrieve_button = True
+                        st.rerun()
 
             # Display alerts if retrieve button is clicked
             if retrieve_button:
@@ -404,7 +430,7 @@ def main():
                         if alert['image_data']:
                             try:
                                 image = Image.open(io.BytesIO(alert['image_data']))
-                                st.image(image, caption=f"Alert {alert['id']} Image", use_column_width=True)
+                                st.image(image, caption=f"Alert {alert['id']} Image", use_container_width=True)
                             except Exception as e:
                                 st.error(f"Error displaying image: {e}")
                         
@@ -420,5 +446,3 @@ def main():
 # Run the app
 if __name__ == "__main__":
     main()
-
-
