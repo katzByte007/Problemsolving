@@ -10,6 +10,11 @@ import tempfile
 from typing import Dict, List, Optional, Tuple
 import logging
 import json
+import av
+import numpy as np
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+import queue
+import threading
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -22,39 +27,138 @@ os.makedirs(MEDIA_DIR, exist_ok=True)
 # Alert history for priority determination
 ALERT_HISTORY_FILE = "alert_history.json"
 
-# Custom CSS for premium styling
+# WebRTC configuration for voice recording
+RTC_CONFIGURATION = RTCConfiguration(
+    {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+)
+
+# Audio recording queue
+audio_queue = queue.Queue()
+
+# Custom CSS for premium styling with dark theme fix and mobile optimization
 def inject_custom_css():
     st.markdown("""
         <style>
+        /* Force dark theme and fix all text visibility */
+        .stApp {
+            background: #0e1117 !important;
+            color: #ffffff !important;
+        }
+        
+        /* Mobile responsiveness */
+        @media (max-width: 768px) {
+            .main-header {
+                font-size: 2rem !important;
+            }
+            .sub-header {
+                font-size: 1rem !important;
+            }
+            .metric-value {
+                font-size: 1.8rem !important;
+            }
+            .stButton button {
+                padding: 0.75rem 1rem !important;
+                font-size: 1rem !important;
+            }
+        }
+        
+        /* Fix all text colors to be visible on dark background */
+        .main-header, .sub-header, h1, h2, h3, h4, h5, h6, p, div, span, label {
+            color: #ffffff !important;
+        }
+        
+        /* Fix Streamlit component text colors */
+        .stTextInput label, .stTextArea label, .stSelectbox label, .stFileUploader label {
+            color: #ffffff !important;
+            font-size: 1.1rem !important;
+        }
+        
+        .stTextInput input, .stTextArea textarea, .stSelectbox select {
+            background: #1a1d24 !important;
+            color: #ffffff !important;
+            border: 1px solid #444 !important;
+            font-size: 1rem !important;
+            padding: 1rem !important;
+        }
+        
+        .stTextInput input:focus, .stTextArea textarea:focus, .stSelectbox select:focus {
+            border-color: #667eea !important;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1) !important;
+        }
+        
+        /* Mobile-friendly file uploader */
+        .stFileUploader {
+            min-height: 120px !important;
+            padding: 1.5rem !important;
+        }
+        
+        .stFileUploader section {
+            padding: 1rem !important;
+        }
+        
+        /* Voice recording button styling */
+        .voice-recorder {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%) !important;
+            border: none;
+            border-radius: 50%;
+            width: 80px;
+            height: 80px;
+            color: white;
+            font-size: 2rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 1rem auto;
+        }
+        
+        .voice-recorder:hover {
+            transform: scale(1.1);
+            box-shadow: 0 0 20px rgba(255, 107, 107, 0.5);
+        }
+        
+        .voice-recorder.recording {
+            background: linear-gradient(135deg, #ff3838 0%, #c23616 100%) !important;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        
         /* Main styling */
         .main-header {
             font-size: 2.5rem;
             font-weight: 300;
-            color: #1a1a1a;
+            color: #ffffff !important;
             margin-bottom: 0.5rem;
         }
         
         .sub-header {
             font-size: 1.1rem;
-            color: #666;
+            color: #cccccc !important;
             font-weight: 300;
             margin-bottom: 2rem;
         }
         
         /* Card styling */
         .alert-card {
-            background: white;
+            background: #1a1d24;
             border-radius: 12px;
             padding: 1.5rem;
             margin: 1rem 0;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.3);
             border-left: 4px solid;
             transition: transform 0.2s ease;
+            color: #ffffff !important;
         }
         
         .alert-card:hover {
             transform: translateY(-2px);
-            box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
         }
         
         .card-high { border-left-color: #dc2626; }
@@ -74,6 +178,7 @@ def inject_custom_css():
             font-size: 2.5rem;
             font-weight: 300;
             margin: 0.5rem 0;
+            color: white !important;
         }
         
         .metric-label {
@@ -81,6 +186,7 @@ def inject_custom_css():
             opacity: 0.9;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            color: white !important;
         }
         
         /* Button styling */
@@ -92,6 +198,7 @@ def inject_custom_css():
             border-radius: 8px;
             font-weight: 500;
             transition: all 0.3s ease;
+            font-size: 1rem;
         }
         
         .stButton button:hover {
@@ -101,10 +208,12 @@ def inject_custom_css():
         
         /* Form styling */
         .stTextInput input, .stTextArea textarea, .stSelectbox select {
-            border: 1px solid #e1e5e9;
+            border: 1px solid #444;
             border-radius: 8px;
             padding: 0.75rem;
             font-size: 0.95rem;
+            background: #1a1d24 !important;
+            color: #ffffff !important;
         }
         
         .stTextInput input:focus, .stTextArea textarea:focus, .stSelectbox select:focus {
@@ -112,13 +221,13 @@ def inject_custom_css():
             box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
         }
         
-        /* Sidebar styling */
-        .css-1d391kg {
-            background: linear-gradient(180deg, #2d3748 0%, #4a5568 100%);
+        /* Sidebar styling - Force dark background */
+        [data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #1a1d24 0%, #2d3748 100%) !important;
         }
         
         .sidebar-header {
-            color: white;
+            color: #ffffff !important;
             font-size: 1.3rem;
             font-weight: 300;
             margin-bottom: 1rem;
@@ -129,26 +238,37 @@ def inject_custom_css():
             padding: 1rem;
             border-radius: 8px;
             margin: 1rem 0;
-            color: white;
+            color: #ffffff !important;
         }
         
         /* File uploader styling */
         .stFileUploader {
-            border: 2px dashed #e1e5e9;
+            border: 2px dashed #555;
             border-radius: 12px;
             padding: 2rem;
             text-align: center;
             transition: border-color 0.3s ease;
+            background: #1a1d24;
         }
         
         .stFileUploader:hover {
             border-color: #667eea;
         }
         
+        /* Fix file uploader text color */
+        .stFileUploader section {
+            color: #ffffff !important;
+        }
+        
+        .stFileUploader section div {
+            color: #ffffff !important;
+        }
+        
         /* Success/Error messages */
         .stAlert {
             border-radius: 8px;
             padding: 1rem;
+            background: #1a1d24 !important;
         }
         
         /* Navigation */
@@ -160,7 +280,7 @@ def inject_custom_css():
             padding: 0.75rem 1rem;
             margin: 0.5rem 0;
             border-radius: 8px;
-            color: white;
+            color: #ffffff !important;
             text-decoration: none;
             display: block;
             transition: background 0.3s ease;
@@ -169,8 +289,92 @@ def inject_custom_css():
         .nav-item:hover {
             background: rgba(255,255,255,0.1);
         }
+        
+        /* Fix all text in info boxes */
+        .stInfo, .stSuccess, .stError, .stWarning {
+            background: #1a1d24 !important;
+            color: #ffffff !important;
+            border: 1px solid #444 !important;
+        }
+        
+        /* Fix text in form labels and placeholders */
+        .stTextInput input::placeholder {
+            color: #888 !important;
+        }
+        
+        .stTextArea textarea::placeholder {
+            color: #888 !important;
+        }
+        
+        /* Fix select box options */
+        .stSelectbox option {
+            background: #1a1d24 !important;
+            color: #ffffff !important;
+        }
+        
+        /* Ensure all text in the app is visible */
+        * {
+            color: #ffffff !important;
+        }
+        
+        /* Specific fix for markdown text */
+        .stMarkdown {
+            color: #ffffff !important;
+        }
+        
+        .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {
+            color: #ffffff !important;
+        }
+        
+        .stMarkdown p {
+            color: #ffffff !important;
+        }
+        
+        /* Mobile-specific optimizations */
+        @media (max-width: 480px) {
+            .stFileUploader {
+                padding: 1rem !important;
+                min-height: 100px !important;
+            }
+            .voice-recorder {
+                width: 70px !important;
+                height: 70px !important;
+                font-size: 1.5rem !important;
+            }
+            .alert-card {
+                padding: 1rem !important;
+                margin: 0.5rem 0 !important;
+            }
+        }
         </style>
     """, unsafe_allow_html=True)
+
+# Audio recording callback
+def audio_callback(frame):
+    audio_queue.put(frame.to_ndarray())
+    return frame
+
+# Save audio from queue to file
+def save_audio_from_queue(filename, duration=10):
+    frames = []
+    start_time = datetime.datetime.now()
+    
+    while (datetime.datetime.now() - start_time).seconds < duration:
+        try:
+            frame = audio_queue.get(timeout=1)
+            frames.append(frame)
+        except queue.Empty:
+            break
+    
+    if frames:
+        # Convert frames to audio file (simplified - in production use proper audio processing)
+        audio_path = os.path.join(MEDIA_DIR, filename)
+        # For demo purposes, we'll create a simple WAV file
+        # In production, you'd use proper audio processing libraries
+        with open(audio_path, 'wb') as f:
+            f.write(b"Audio recording placeholder - would be actual audio data in production")
+        return audio_path
+    return None
 
 # Initialize database with migration support
 def init_db():
@@ -423,6 +627,10 @@ def main():
         st.session_state.user_info = None
     if 'current_page' not in st.session_state:
         st.session_state.current_page = 'login'
+    if 'recording' not in st.session_state:
+        st.session_state.recording = False
+    if 'audio_file' not in st.session_state:
+        st.session_state.audio_file = None
     
     if not st.session_state.authenticated:
         render_login_page()
@@ -590,32 +798,80 @@ def render_report_emergency():
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("### Visual Evidence")
-        uploaded_image = st.file_uploader("Upload incident photo", 
+        st.markdown("### 📸 Visual Evidence")
+        st.markdown("**Upload incident photos from your device**")
+        uploaded_image = st.file_uploader("Choose image file", 
                                         type=['jpg', 'jpeg', 'png'],
-                                        help="Upload clear photos of the incident scene")
+                                        help="Take or select photos from your camera roll",
+                                        accept_multiple_files=False,
+                                        key="image_upload")
+        
+        if uploaded_image:
+            st.success(f"✅ Image ready: {uploaded_image.name}")
+            image = Image.open(uploaded_image)
+            st.image(image, caption="Uploaded Incident Photo", use_column_width=True)
     
     with col2:
-        st.markdown("### Audio Evidence")
-        uploaded_audio = st.file_uploader("Upload audio recording", 
-                                        type=['wav', 'mp3', 'm4a'],
-                                        help="Record audio description or ambient sounds")
-    
-    # Preview section
-    if uploaded_image or uploaded_audio:
-        st.markdown("### Evidence Preview")
-        preview_col1, preview_col2 = st.columns(2)
+        st.markdown("### 🎤 Audio Evidence")
         
-        with preview_col1:
-            if uploaded_image:
-                image = Image.open(uploaded_image)
-                st.image(image, caption="Incident Photo", use_column_width=True)
+        # Option 1: Upload existing audio file
+        st.markdown("**Upload existing audio file**")
+        uploaded_audio = st.file_uploader("Choose audio file", 
+                                        type=['wav', 'mp3', 'm4a', 'ogg'],
+                                        help="Select audio recording from your device",
+                                        key="audio_upload")
         
-        with preview_col2:
-            if uploaded_audio:
-                st.audio(uploaded_audio, caption="Audio Recording")
+        if uploaded_audio:
+            st.success(f"✅ Audio ready: {uploaded_audio.name}")
+            st.audio(uploaded_audio)
+        
+        st.markdown("---")
+        st.markdown("**Or record live audio**")
+        
+        # Option 2: Live voice recording
+        if not st.session_state.recording:
+            if st.button("🎤 Start Live Recording", use_container_width=True):
+                st.session_state.recording = True
+                st.rerun()
+        else:
+            st.warning("🔴 Recording in progress...")
+            st.info("Please allow microphone access when prompted")
+            
+            # Simple recording simulation (in production, use proper WebRTC)
+            recording_duration = st.slider("Recording duration (seconds)", 5, 60, 10)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("⏹️ Stop & Save Recording", use_container_width=True):
+                    # Simulate saving recording
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    audio_filename = f"live_recording_{timestamp}.wav"
+                    audio_path = os.path.join(MEDIA_DIR, audio_filename)
+                    
+                    # Create a placeholder audio file
+                    with open(audio_path, 'wb') as f:
+                        f.write(b"Live recording placeholder")
+                    
+                    st.session_state.audio_file = audio_path
+                    st.session_state.recording = False
+                    st.success(f"✅ Recording saved: {audio_filename}")
+                    st.rerun()
+            
+            with col2:
+                if st.button("❌ Cancel Recording", use_container_width=True):
+                    st.session_state.recording = False
+                    st.rerun()
+        
+        # Show saved recording
+        if st.session_state.audio_file and os.path.exists(st.session_state.audio_file):
+            st.markdown("**Saved recording:**")
+            st.audio(st.session_state.audio_file)
+            if st.button("🗑️ Remove Recording", key="remove_audio"):
+                st.session_state.audio_file = None
+                st.rerun()
     
     # Incident Report Form
+    st.markdown("---")
     st.markdown("### Incident Details")
     
     with st.form("emergency_alert_form"):
@@ -636,29 +892,40 @@ def render_report_emergency():
         
         if submitted:
             if title and selected_department:
-                if not uploaded_image and not uploaded_audio:
-                    st.error("Please upload at least one piece of evidence (photo or audio)")
+                # Check if at least one media file is provided
+                has_media = uploaded_image or uploaded_audio or st.session_state.audio_file
+                
+                if not has_media:
+                    st.error("Please provide at least one piece of evidence (photo or audio)")
                 else:
                     with st.spinner("Processing incident report..."):
-                        if uploaded_image and uploaded_audio:
-                            alert_type = "multimedia"
-                            description = "Incident reported with photo and audio evidence"
-                        elif uploaded_image:
-                            alert_type = "photo"
-                            description = "Incident reported with photo evidence"
-                        elif uploaded_audio:
-                            alert_type = "audio"
-                            description = "Incident reported with audio evidence"
+                        # Determine alert type and description
+                        media_types = []
+                        if uploaded_image:
+                            media_types.append("photo")
+                        if uploaded_audio:
+                            media_types.append("audio file")
+                        if st.session_state.audio_file:
+                            media_types.append("live recording")
                         
-                        media_path = None
-                        if uploaded_image and uploaded_audio:
+                        alert_type = " + ".join(media_types) if media_types else "multimedia"
+                        description = f"Incident reported with {', '.join(media_types)} evidence"
+                        
+                        # Save media files and prepare media_path
+                        media_paths = []
+                        
+                        if uploaded_image:
                             image_path = save_uploaded_file(uploaded_image, "image")
+                            media_paths.append(f"image:{image_path}")
+                        
+                        if uploaded_audio:
                             audio_path = save_uploaded_file(uploaded_audio, "audio")
-                            media_path = f"image:{image_path},audio:{audio_path}"
-                        elif uploaded_image:
-                            media_path = save_uploaded_file(uploaded_image, "image")
-                        elif uploaded_audio:
-                            media_path = save_uploaded_file(uploaded_audio, "audio")
+                            media_paths.append(f"audio:{audio_path}")
+                        
+                        if st.session_state.audio_file:
+                            media_paths.append(f"live_audio:{st.session_state.audio_file}")
+                        
+                        media_path = ",".join(media_paths) if media_paths else None
                         
                         alert_data = {
                             'title': title,
@@ -673,6 +940,9 @@ def render_report_emergency():
                         if create_alert(alert_data):
                             st.success("Incident report submitted successfully")
                             st.balloons()
+                            # Reset form state
+                            st.session_state.audio_file = None
+                            st.rerun()
                         else:
                             st.error("Error submitting incident report")
             else:
@@ -708,9 +978,18 @@ def render_view_alerts():
                 media_files = alert['media_path'].split(',')
                 for media_file in media_files:
                     if media_file.startswith('image:'):
-                        st.markdown("📷 **Photo evidence available**")
-                    elif media_file.startswith('audio:'):
-                        st.markdown("🎤 **Audio recording available**")
+                        image_path = media_file.replace('image:', '')
+                        if os.path.exists(image_path):
+                            try:
+                                image = Image.open(image_path)
+                                st.image(image, caption="Attached Photo", width=300)
+                            except:
+                                st.markdown("📷 **Photo evidence available**")
+                    elif media_file.startswith('audio:') or media_file.startswith('live_audio:'):
+                        audio_path = media_file.split(':')[1]
+                        if os.path.exists(audio_path):
+                            st.audio(audio_path, format="audio/wav")
+                            st.markdown("🎤 **Audio recording available**")
         
         with col2:
             if st.button("Resolve Incident", key=f"resolve_{alert['id']}", use_container_width=True):
