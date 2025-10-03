@@ -282,7 +282,7 @@ def main():
         st.session_state['department'] = None
 
     if 'HUGGINGFACE_TOKEN' not in st.secrets:
-        st.secrets['HUGGINGFACE_TOKEN'] = "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"
+        st.secrets['HUGGINGFACE_TOKEN'] = "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"
 
     init_database()
 
@@ -421,4 +421,5 @@ def main():
 # Run the app
 if __name__ == "__main__":
     main()
+
 
