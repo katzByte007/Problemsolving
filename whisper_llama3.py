@@ -3,7 +3,7 @@ import sqlite3
 import hashlib
 import torch
 import whisper
-import ollama
+
 import base64
 import numpy as np
 from PIL import Image
@@ -282,7 +282,7 @@ def main():
         st.session_state['department'] = None
 
     if 'HUGGINGFACE_TOKEN' not in st.secrets:
-        st.secrets['HUGGINGFACE_TOKEN'] = "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"
+        st.secrets['HUGGINGFACE_TOKEN'] = "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"
 
     init_database()
 
@@ -421,5 +421,3 @@ def main():
 # Run the app
 if __name__ == "__main__":
     main()
-
-
