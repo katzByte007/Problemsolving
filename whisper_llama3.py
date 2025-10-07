@@ -22,33 +22,46 @@ os.makedirs(MEDIA_DIR, exist_ok=True)
 # Alert history for priority determination
 ALERT_HISTORY_FILE = "alert_history.json"
 
-# Custom CSS for premium styling with dark theme fix
+# Custom CSS for premium styling with forced dark theme
 def inject_custom_css():
     st.markdown("""
         <style>
-        /* Force dark theme and fix all text visibility */
+        /* Force dark theme and override all theme variables */
+        :root {
+            --primary-color: #ffffff !important;
+            --background-color: #0e1117 !important;
+            --secondary-background-color: #1a1d24 !important;
+            --text-color: #ffffff !important;
+            --font: "Source Sans Pro", sans-serif !important;
+        }
+        
+        /* Completely override Streamlit's theme system */
         .stApp {
             background: #0e1117 !important;
             color: #ffffff !important;
         }
         
-        /* Fix all text colors to be visible on dark background */
-        .main-header, .sub-header, h1, h2, h3, h4, h5, h6, p, div, span, label {
+        /* Force all text elements to use white color */
+        .main-header, .sub-header, h1, h2, h3, h4, h5, h6, p, div, span, label, li, ul, ol, td, th, tr, thead, tbody {
             color: #ffffff !important;
         }
         
-        /* Fix Streamlit component text colors */
-        .stTextInput label, .stTextArea label, .stSelectbox label, .stFileUploader label {
+        /* Fix Streamlit component text colors with !important */
+        .stTextInput label, .stTextArea label, .stSelectbox label, .stFileUploader label,
+        .stNumberInput label, .stDateInput label, .stTimeInput label, .stMultiSelect label {
             color: #ffffff !important;
         }
         
-        .stTextInput input, .stTextArea textarea, .stSelectbox select {
+        /* Form inputs with dark background and white text */
+        .stTextInput input, .stTextArea textarea, .stSelectbox select,
+        .stNumberInput input, .stDateInput input, .stTimeInput input {
             background: #1a1d24 !important;
             color: #ffffff !important;
             border: 1px solid #444 !important;
         }
         
-        .stTextInput input:focus, .stTextArea textarea:focus, .stSelectbox select:focus {
+        .stTextInput input:focus, .stTextArea textarea:focus, .stSelectbox select:focus,
+        .stNumberInput input:focus, .stDateInput input:focus, .stTimeInput input:focus {
             border-color: #667eea !important;
             box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1) !important;
         }
@@ -94,7 +107,7 @@ def inject_custom_css():
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             border-radius: 12px;
             padding: 1.5rem;
-            color: white;
+            color: white !important;
             text-align: center;
         }
         
@@ -116,7 +129,7 @@ def inject_custom_css():
         /* Button styling */
         .stButton button {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            color: white !important;
             border: none;
             padding: 0.5rem 2rem;
             border-radius: 8px;
@@ -149,6 +162,10 @@ def inject_custom_css():
             background: linear-gradient(180deg, #1a1d24 0%, #2d3748 100%) !important;
         }
         
+        [data-testid="stSidebar"] * {
+            color: #ffffff !important;
+        }
+        
         .sidebar-header {
             color: #ffffff !important;
             font-size: 1.3rem;
@@ -171,7 +188,7 @@ def inject_custom_css():
             padding: 2rem;
             text-align: center;
             transition: border-color 0.3s ease;
-            background: #1a1d24;
+            background: #1a1d24 !important;
         }
         
         .stFileUploader:hover {
@@ -181,6 +198,7 @@ def inject_custom_css():
         /* Fix file uploader text color */
         .stFileUploader section {
             color: #ffffff !important;
+            background: #1a1d24 !important;
         }
         
         .stFileUploader section div {
@@ -192,6 +210,8 @@ def inject_custom_css():
             border-radius: 8px;
             padding: 1rem;
             background: #1a1d24 !important;
+            color: #ffffff !important;
+            border: 1px solid #444 !important;
         }
         
         /* Navigation */
@@ -256,7 +276,7 @@ def inject_custom_css():
         /* Mic button styling */
         .mic-button {
             background: #dc2626;
-            color: white;
+            color: white !important;
             border: none;
             border-radius: 50%;
             width: 80px;
@@ -284,6 +304,116 @@ def inject_custom_css():
             0% { transform: scale(1); }
             50% { transform: scale(1.1); }
             100% { transform: scale(1); }
+        }
+        
+        /* Role-specific styling */
+        .employee-view {
+            border: 2px solid #667eea;
+            border-radius: 12px;
+            padding: 1rem;
+            margin: 1rem 0;
+            background: rgba(102, 126, 234, 0.1);
+        }
+        
+        .department-head-view {
+            border: 2px solid #10b981;
+            border-radius: 12px;
+            padding: 1rem;
+            margin: 1rem 0;
+            background: rgba(16, 185, 129, 0.1);
+        }
+        
+        .role-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-left: 0.5rem;
+        }
+        
+        .badge-employee {
+            background: #667eea;
+            color: white;
+        }
+        
+        .badge-department-head {
+            background: #10b981;
+            color: white;
+        }
+        
+        .badge-admin {
+            background: #f59e0b;
+            color: white;
+        }
+        
+        /* Fix dataframe and table colors */
+        .dataframe {
+            background: #1a1d24 !important;
+            color: #ffffff !important;
+        }
+        
+        .dataframe th {
+            background: #2d3748 !important;
+            color: #ffffff !important;
+        }
+        
+        .dataframe td {
+            background: #1a1d24 !important;
+            color: #ffffff !important;
+            border-color: #444 !important;
+        }
+        
+        /* Fix expander colors */
+        .streamlit-expanderHeader {
+            background: #1a1d24 !important;
+            color: #ffffff !important;
+            border: 1px solid #444 !important;
+        }
+        
+        .streamlit-expanderContent {
+            background: #1a1d24 !important;
+            color: #ffffff !important;
+            border: 1px solid #444 !important;
+        }
+        
+        /* Fix checkbox colors */
+        .stCheckbox label {
+            color: #ffffff !important;
+        }
+        
+        /* Fix radio button colors */
+        .stRadio label {
+            color: #ffffff !important;
+        }
+        
+        /* Fix tab colors */
+        .stTabs [data-baseweb="tab-list"] {
+            background: #1a1d24 !important;
+            gap: 2px;
+        }
+        
+        .stTabs [data-baseweb="tab"] {
+            background: #2d3748 !important;
+            color: #ffffff !important;
+            border-radius: 4px 4px 0 0;
+        }
+        
+        .stTabs [aria-selected="true"] {
+            background: #667eea !important;
+        }
+        
+        /* Additional overrides for complete theme control */
+        .st-bb {
+            background-color: #1a1d24 !important;
+        }
+        
+        .st-at {
+            background-color: #1a1d24 !important;
+        }
+        
+        .st-bh, .st-bi, .st-bj, .st-bk, .st-bl, .st-bm, .st-bn, .st-bo, .st-bp, .st-bq, .st-br, .st-bs, .st-bt, .st-bu, .st-bv, .st-bw, .st-bx, .st-by, .st-bz {
+            color: #ffffff !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -329,7 +459,11 @@ def init_db():
         ('health_head', 'health123', 'Health Care', 'department_head'),
         ('equipment_head', 'equipment123', 'Equipment Damage', 'department_head'),
         ('missing_head', 'missing123', 'Missing Items', 'department_head'),
-        ('admin', 'admin123', 'All', 'admin')
+        ('admin', 'admin123', 'All', 'admin'),
+        ('employee1', 'emp123', 'Fire', 'employee'),
+        ('employee2', 'emp123', 'Health Care', 'employee'),
+        ('employee3', 'emp123', 'Equipment Damage', 'employee'),
+        ('employee4', 'emp123', 'Missing Items', 'employee')
     ]
     
     for username, password, department, role in default_users:
@@ -814,21 +948,23 @@ def render_login_page():
             cols = st.columns(2)
             with cols[0]:
                 st.info("""
-                **Fire Department**  
-                `fire_head` / `fire123`
-                
-                **Health Care**  
-                `health_head` / `health123`
+                **Department Heads**  
+                `fire_head` / `fire123`  
+                `health_head` / `health123`  
+                `equipment_head` / `equipment123`  
+                `missing_head` / `missing123`
                 """)
             with cols[1]:
                 st.info("""
-                **Equipment Damage**  
-                `equipment_head` / `equipment123`
+                **Employees**  
+                `employee1` / `emp123` (Fire)  
+                `employee2` / `emp123` (Health)  
+                `employee3` / `emp123` (Equipment)  
+                `employee4` / `emp123` (Missing)
                 
-                **Missing Items**  
-                `missing_head` / `missing123`
+                **Administrator**  
+                `admin` / `admin123`
                 """)
-            st.info("**Administrator:** `admin` / `admin123`")
 
 def render_main_application():
     user_info = st.session_state.user_info
@@ -838,8 +974,13 @@ def render_main_application():
         
         st.markdown('<div class="user-info">', unsafe_allow_html=True)
         st.markdown(f"**{user_info['username']}**")
+        
+        # Display role badge
+        role_badge_class = f"badge-{user_info['role'].replace('_', '-')}"
+        role_display = user_info['role'].replace('_', ' ').title()
+        st.markdown(f'<span class="role-badge {role_badge_class}">{role_display}</span>', unsafe_allow_html=True)
+        
         st.markdown(f"*{user_info['department']} Department*")
-        st.markdown(f"Role: {user_info['role'].title()}")
         st.markdown('</div>', unsafe_allow_html=True)
         
         st.markdown('<div class="nav-section">', unsafe_allow_html=True)
@@ -870,6 +1011,21 @@ def render_dashboard():
     
     user_info = st.session_state.user_info
     alerts = get_alerts(user_info['department'], user_info['role'])
+    
+    # Role-specific welcome message
+    if user_info['role'] == 'employee':
+        st.markdown('<div class="employee-view">', unsafe_allow_html=True)
+        st.markdown("### 👤 Employee Dashboard")
+        st.markdown("You can report incidents and view active alerts in your department.")
+        st.markdown('</div>', unsafe_allow_html=True)
+    elif user_info['role'] == 'department_head':
+        st.markdown('<div class="department-head-view">', unsafe_allow_html=True)
+        st.markdown("### 👨‍💼 Department Head Dashboard")
+        st.markdown("You have authority to view, manage, and resolve incidents in your department.")
+        st.markdown('</div>', unsafe_allow_html=True)
+    elif user_info['role'] == 'admin':
+        st.markdown("### 👑 Administrator Dashboard")
+        st.markdown("You have full system access across all departments.")
     
     # Statistics Cards
     col1, col2, col3, col4 = st.columns(4)
@@ -929,10 +1085,14 @@ def render_dashboard():
                 display_media(alert)
         
         with col2:
-            if st.button("Resolve", key=f"resolve_{alert['id']}", use_container_width=True):
-                if resolve_alert(alert['id'], user_info['username']):
-                    st.success("Incident resolved")
-                    st.rerun()
+            # Only show resolve button for department heads and admin
+            if user_info['role'] in ['department_head', 'admin']:
+                if st.button("Resolve", key=f"resolve_{alert['id']}", use_container_width=True):
+                    if resolve_alert(alert['id'], user_info['username']):
+                        st.success("Incident resolved")
+                        st.rerun()
+            else:
+                st.info("🔒 Department Head Only")
         
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -941,6 +1101,18 @@ def render_report_emergency():
     st.markdown('<div class="sub-header">Submit incident report with multimedia evidence</div>', unsafe_allow_html=True)
     
     user_info = st.session_state.user_info
+    
+    # Role-specific styling for report page
+    if user_info['role'] == 'employee':
+        st.markdown('<div class="employee-view">', unsafe_allow_html=True)
+        st.markdown("### 👤 Employee Incident Reporting")
+        st.markdown("As an employee, you can report incidents to any department based on the incident type.")
+        st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="department-head-view">', unsafe_allow_html=True)
+        st.markdown("### 👨‍💼 Department Head Incident Reporting")
+        st.markdown("As a department head, you can report incidents to any relevant department.")
+        st.markdown('</div>', unsafe_allow_html=True)
     
     # Initialize session state for audio recording
     if 'audio_recorded' not in st.session_state:
@@ -1026,24 +1198,33 @@ def render_report_emergency():
         col1, col2 = st.columns(2)
         
         with col1:
-            title = st.text_input("Incident Title*", 
-                                placeholder="Brief descriptive title")
+            # Changed from "Incident Title" to "Incident Location"
+            location = st.text_input("Incident Location*", 
+                                   placeholder="Enter exact location of incident")
         
         with col2:
+            # ALL users (employees and department heads) can select any department
             departments = ["Fire", "Health Care", "Equipment Damage", "Missing Items", "General"]
-            selected_department = st.selectbox(
+            
+            # Show user's department as default but allow selection of any department
+            user_department = user_info['department']
+            default_index = departments.index(user_department) if user_department in departments else 0
+            
+            department = st.selectbox(
                 "Responsible Department*",
-                departments
+                departments,
+                index=default_index,
+                help="Select the department responsible for handling this incident"
             )
         
         description = st.text_area("Incident Description*",
-                                 placeholder="Provide detailed description of the incident",
+                                 placeholder="Provide detailed description of the incident including what happened, people involved, and immediate risks",
                                  height=100)
         
         submitted = st.form_submit_button("Submit Incident Report", use_container_width=True)
         
         if submitted:
-            if title and selected_department and description:
+            if location and department and description:
                 has_media = uploaded_image or st.session_state.get('recorded_audio_path') or uploaded_audio
                 if not has_media:
                     st.error("Please provide at least one piece of evidence (photo or audio)")
@@ -1075,9 +1256,9 @@ def render_report_emergency():
                         media_path = ",".join(media_paths) if media_paths else None
                         
                         alert_data = {
-                            'title': title,
+                            'title': f"Incident at {location}",  # Use location as title
                             'description': description,
-                            'department': selected_department,
+                            'department': department,
                             'priority': "high",
                             'alert_type': alert_type,
                             'media_path': media_path,
@@ -1104,6 +1285,18 @@ def render_view_alerts():
     st.markdown('<div class="sub-header">Manage and monitor emergency situations</div>', unsafe_allow_html=True)
     
     user_info = st.session_state.user_info
+    
+    # Role-specific header
+    if user_info['role'] == 'employee':
+        st.markdown('<div class="employee-view">', unsafe_allow_html=True)
+        st.markdown("### 👤 Employee View - Active Incidents")
+        st.markdown("You can view all active incidents in your department. Department heads will resolve them.")
+        st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="department-head-view">', unsafe_allow_html=True)
+        st.markdown("### 👨‍💼 Department Head View - Incident Management")
+        st.markdown("You have authority to view and resolve incidents in your department.")
+        st.markdown('</div>', unsafe_allow_html=True)
     
     # Create tabs for Active and Resolved incidents
     tab1, tab2 = st.tabs(["🚨 Active Incidents", "📋 Resolved Cases"])
@@ -1140,10 +1333,15 @@ def render_view_alerts():
                         display_media(alert)
                 
                 with col2:
-                    if st.button("Resolve Incident", key=f"resolve_{alert['id']}", use_container_width=True):
-                        if resolve_alert(alert['id'], user_info['username']):
-                            st.success("Incident resolved")
-                            st.rerun()
+                    # Only show resolve button for department heads and admin
+                    if user_info['role'] in ['department_head', 'admin']:
+                        if st.button("Resolve Incident", key=f"resolve_{alert['id']}", use_container_width=True):
+                            if resolve_alert(alert['id'], user_info['username']):
+                                st.success("Incident resolved")
+                                st.rerun()
+                    else:
+                        st.info("Pending Resolution")
+                        st.caption("Department Head Action Required")
                 
                 st.markdown('</div>', unsafe_allow_html=True)
     
