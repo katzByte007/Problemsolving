@@ -1,423 +1,1212 @@
 import streamlit as st
 import sqlite3
+import os
 import hashlib
-import torch
-import whisper
-
-import base64
-import numpy as np
+import datetime
 from PIL import Image
 import io
-import re
-from gtts import gTTS
-import requests
+import base64
+import tempfile
+from typing import Dict, List, Optional, Tuple
+import logging
 import json
-from streamlit_webrtc import webrtc_streamer
-import av
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
+# Create media directory
+MEDIA_DIR = "media"
+os.makedirs(MEDIA_DIR, exist_ok=True)
 
-# Database Initialization
-def init_database():
-    """Initialize SQLite database for users and alerts with media storage"""
-    conn = sqlite3.connect('user4_database.db')
-    cursor = conn.cursor()
+# Alert history for priority determination
+ALERT_HISTORY_FILE = "alert_history.json"
+
+# Custom CSS for premium styling with dark theme fix
+def inject_custom_css():
+    st.markdown("""
+        <style>
+        /* Force dark theme and fix all text visibility */
+        .stApp {
+            background: #0e1117 !important;
+            color: #ffffff !important;
+        }
+        
+        /* Fix all text colors to be visible on dark background */
+        .main-header, .sub-header, h1, h2, h3, h4, h5, h6, p, div, span, label {
+            color: #ffffff !important;
+        }
+        
+        /* Fix Streamlit component text colors */
+        .stTextInput label, .stTextArea label, .stSelectbox label, .stFileUploader label {
+            color: #ffffff !important;
+        }
+        
+        .stTextInput input, .stTextArea textarea, .stSelectbox select {
+            background: #1a1d24 !important;
+            color: #ffffff !important;
+            border: 1px solid #444 !important;
+        }
+        
+        .stTextInput input:focus, .stTextArea textarea:focus, .stSelectbox select:focus {
+            border-color: #667eea !important;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1) !important;
+        }
+        
+        /* Main styling */
+        .main-header {
+            font-size: 2.5rem;
+            font-weight: 300;
+            color: #ffffff !important;
+            margin-bottom: 0.5rem;
+        }
+        
+        .sub-header {
+            font-size: 1.1rem;
+            color: #cccccc !important;
+            font-weight: 300;
+            margin-bottom: 2rem;
+        }
+        
+        /* Card styling */
+        .alert-card {
+            background: #1a1d24;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin: 1rem 0;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+            border-left: 4px solid;
+            transition: transform 0.2s ease;
+            color: #ffffff !important;
+        }
+        
+        .alert-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        }
+        
+        .card-high { border-left-color: #dc2626; }
+        .card-medium { border-left-color: #f59e0b; }
+        .card-low { border-left-color: #10b981; }
+        
+        /* Metric cards */
+        .metric-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            padding: 1.5rem;
+            color: white;
+            text-align: center;
+        }
+        
+        .metric-value {
+            font-size: 2.5rem;
+            font-weight: 300;
+            margin: 0.5rem 0;
+            color: white !important;
+        }
+        
+        .metric-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: white !important;
+        }
+        
+        /* Button styling */
+        .stButton button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 0.5rem 2rem;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+        
+        .stButton button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        /* Form styling */
+        .stTextInput input, .stTextArea textarea, .stSelectbox select {
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 0.75rem;
+            font-size: 0.95rem;
+            background: #1a1d24 !important;
+            color: #ffffff !important;
+        }
+        
+        .stTextInput input:focus, .stTextArea textarea:focus, .stSelectbox select:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+        }
+        
+        /* Sidebar styling - Force dark background */
+        [data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #1a1d24 0%, #2d3748 100%) !important;
+        }
+        
+        .sidebar-header {
+            color: #ffffff !important;
+            font-size: 1.3rem;
+            font-weight: 300;
+            margin-bottom: 1rem;
+        }
+        
+        .user-info {
+            background: rgba(255,255,255,0.1);
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+            color: #ffffff !important;
+        }
+        
+        /* File uploader styling */
+        .stFileUploader {
+            border: 2px dashed #555;
+            border-radius: 12px;
+            padding: 2rem;
+            text-align: center;
+            transition: border-color 0.3s ease;
+            background: #1a1d24;
+        }
+        
+        .stFileUploader:hover {
+            border-color: #667eea;
+        }
+        
+        /* Fix file uploader text color */
+        .stFileUploader section {
+            color: #ffffff !important;
+        }
+        
+        .stFileUploader section div {
+            color: #ffffff !important;
+        }
+        
+        /* Success/Error messages */
+        .stAlert {
+            border-radius: 8px;
+            padding: 1rem;
+            background: #1a1d24 !important;
+        }
+        
+        /* Navigation */
+        .nav-section {
+            margin: 2rem 0;
+        }
+        
+        .nav-item {
+            padding: 0.75rem 1rem;
+            margin: 0.5rem 0;
+            border-radius: 8px;
+            color: #ffffff !important;
+            text-decoration: none;
+            display: block;
+            transition: background 0.3s ease;
+        }
+        
+        .nav-item:hover {
+            background: rgba(255,255,255,0.1);
+        }
+        
+        /* Fix all text in info boxes */
+        .stInfo, .stSuccess, .stError, .stWarning {
+            background: #1a1d24 !important;
+            color: #ffffff !important;
+            border: 1px solid #444 !important;
+        }
+        
+        /* Fix text in form labels and placeholders */
+        .stTextInput input::placeholder {
+            color: #888 !important;
+        }
+        
+        .stTextArea textarea::placeholder {
+            color: #888 !important;
+        }
+        
+        /* Fix select box options */
+        .stSelectbox option {
+            background: #1a1d24 !important;
+            color: #ffffff !important;
+        }
+        
+        /* Ensure all text in the app is visible */
+        * {
+            color: #ffffff !important;
+        }
+        
+        /* Specific fix for markdown text */
+        .stMarkdown {
+            color: #ffffff !important;
+        }
+        
+        .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {
+            color: #ffffff !important;
+        }
+        
+        .stMarkdown p {
+            color: #ffffff !important;
+        }
+        
+        /* Mic button styling */
+        .mic-button {
+            background: #dc2626;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 80px;
+            height: 80px;
+            font-size: 2rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto;
+        }
+        
+        .mic-button:hover {
+            background: #b91c1c;
+            transform: scale(1.1);
+        }
+        
+        .mic-button.recording {
+            background: #ef4444;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+# Initialize database with migration support
+def init_db():
+    conn = sqlite3.connect('emergency_alerts.db')
+    c = conn.cursor()
     
-    # Create users table
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        username TEXT PRIMARY KEY,
-        password TEXT,
-        role TEXT,
-        department TEXT
-    )''')
+    # Users table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            department TEXT NOT NULL,
+            role TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     
-    # Modified alerts table to include media storage
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS alerts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-        department TEXT,
-        priority INTEGER,
-        description TEXT,
-        status TEXT DEFAULT 'UNREAD',
-        image_data BLOB,
-        audio_data BLOB
-    )''')
+    # Alerts table - simplified version
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT,
+            department TEXT NOT NULL,
+            priority TEXT NOT NULL,
+            alert_type TEXT NOT NULL,
+            media_path TEXT,
+            created_by TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT 'active',
+            resolved_at TIMESTAMP,
+            resolved_by TEXT
+        )
+    ''')
     
-    # Add default users (same as before)
+    # Insert default users
     default_users = [
-        ('fire_head', 'firepass', 'head', 'Fire Department'),
-        ('health_head', 'healthpass', 'head', 'Health Care Department'),
-        ('damage_head', 'damagepass', 'head', 'Equipment Damage Department'),
-        ('missing_head', 'missingpass', 'head', 'Missing Item Department')
+        ('fire_head', 'fire123', 'Fire', 'department_head'),
+        ('health_head', 'health123', 'Health Care', 'department_head'),
+        ('equipment_head', 'equipment123', 'Equipment Damage', 'department_head'),
+        ('missing_head', 'missing123', 'Missing Items', 'department_head'),
+        ('admin', 'admin123', 'All', 'admin')
     ]
     
-    for username, password, role, department in default_users:
-        hashed_password = hashlib.sha256(password.encode()).hexdigest()
-        cursor.execute("INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?)", 
-                       (username, hashed_password, role, department))
+    for username, password, department, role in default_users:
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        try:
+            c.execute(
+                'INSERT OR IGNORE INTO users (username, password_hash, department, role) VALUES (?, ?, ?, ?)',
+                (username, password_hash, department, role)
+            )
+        except:
+            pass
     
     conn.commit()
     conn.close()
 
-# Authentication Function
-def authenticate_user(username, password):
-    """Authenticate user credentials"""
-    conn = sqlite3.connect('user4_database.db')
-    cursor = conn.cursor()
+# Hash password
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# Authentication functions
+def authenticate_user(username: str, password: str) -> Optional[Dict]:
+    conn = sqlite3.connect('emergency_alerts.db')
+    c = conn.cursor()
     
-    # Hash the password
-    hashed_password = hashlib.sha256(password.encode()).hexdigest()
+    password_hash = hash_password(password)
+    c.execute(
+        'SELECT username, department, role FROM users WHERE username = ? AND password_hash = ?',
+        (username, password_hash)
+    )
     
-    # Check user credentials
-    cursor.execute("""
-        SELECT username, role, department 
-        FROM users 
-        WHERE username = ? AND password = ?
-    """, (username, hashed_password))
-    
-    user = cursor.fetchone()
+    result = c.fetchone()
     conn.close()
     
-    return user
+    if result:
+        return {
+            'username': result[0],
+            'department': result[1],
+            'role': result[2]
+        }
+    return None
 
-# Create Alert Function
-def create_alert(department, priority, description, image_data=None, audio_data=None):
-    """Create an alert in the database with media data"""
-    conn = sqlite3.connect('user4_database.db')
-    cursor = conn.cursor()
+# Media handling functions
+def save_uploaded_file(uploaded_file, file_type: str) -> str:
+    """Save uploaded file and return path"""
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_extension = uploaded_file.name.split('.')[-1]
+    filename = f"{file_type}_{timestamp}.{file_extension}"
+    filepath = os.path.join(MEDIA_DIR, filename)
     
+    with open(filepath, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    
+    return filepath
+
+def save_audio_file(audio_bytes: bytes) -> str:
+    """Save audio bytes to file"""
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"audio_{timestamp}.wav"
+    filepath = os.path.join(MEDIA_DIR, filename)
+    
+    with open(filepath, "wb") as f:
+        f.write(audio_bytes)
+    
+    return filepath
+
+# Load alert history for priority determination
+def load_alert_history() -> List[Dict]:
+    """Load previous alerts to help with priority determination"""
     try:
-        cursor.execute("""
-            INSERT INTO alerts (department, priority, description, status, image_data, audio_data) 
-            VALUES (?, ?, ?, 'UNREAD', ?, ?)
-        """, (department, priority, description, image_data, audio_data))
+        if os.path.exists(ALERT_HISTORY_FILE):
+            with open(ALERT_HISTORY_FILE, 'r') as f:
+                return json.load(f)
+    except:
+        pass
+    return []
+
+def save_alert_history(history: List[Dict]):
+    """Save alert history"""
+    try:
+        with open(ALERT_HISTORY_FILE, 'w') as f:
+            json.dump(history[-100:], f)
+    except Exception as e:
+        logger.error(f"Error saving alert history: {e}")
+
+# Database operations for alerts
+def create_alert(alert_data: Dict) -> bool:
+    try:
+        conn = sqlite3.connect('emergency_alerts.db')
+        c = conn.cursor()
+        
+        c.execute('''
+            INSERT INTO alerts 
+            (title, description, department, priority, alert_type, media_path, created_by, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            alert_data['title'],
+            alert_data['description'],
+            alert_data['department'],
+            alert_data['priority'],
+            alert_data['alert_type'],
+            alert_data.get('media_path'),
+            alert_data['created_by'],
+            'active'
+        ))
+        
+        history = load_alert_history()
+        history.append({
+            'title': alert_data['title'],
+            'department': alert_data['department'],
+            'priority': alert_data['priority'],
+            'timestamp': datetime.datetime.now().isoformat()
+        })
+        save_alert_history(history)
         
         conn.commit()
-        
-    except Exception as e:
-        print(f"Error creating alert: {e}")
-        conn.rollback()
-    
-    finally:
         conn.close()
-def capture_camera():
-    """Handle camera capture using webrtc"""
-    webrtc_ctx = webrtc_streamer(
-        key="camera",
-        video_frame_callback=None,
-        rtc_configuration={
-            "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
-        }
-    )
-    return webrtc_ctx
-
-def img2txt(input_text, input_image, audio_data=None, additional_context=""):
-    try:
-        # Convert image to bytes for storage
-        buffered = io.BytesIO()
-        input_image.save(buffered, format="PNG")
-        img_data = buffered.getvalue()
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-
-        API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
-        headers = {"Authorization": f"Bearer {st.secrets['HUGGINGFACE_TOKEN']}"}
-        response = requests.post(API_URL, headers=headers, json={"inputs": {"image": img_str}})
-        
-        if response.status_code != 200:
-            st.error(f"API Error: {response.text}")
-            return "Error: Unable to process image"
-
-        image_description = response.json()[0]['generated_text']
-        combined_text = f"{image_description} {input_text} {additional_context}".strip()
-
-        keywords = {
-            'pipe': ('Equipment Damage Department', 3),
-            'leak': ('Equipment Damage Department', 3),
-            'equipment': ('Equipment Damage Department', 3),
-            'fire': ('Fire Department', 1),
-            'smoke': ('Fire Department', 1),
-            'injury': ('Health Care Department', 2),
-            'medical': ('Health Care Department', 2),
-            'missing': ('Missing Item Department', 4),
-            'lost': ('Missing Item Department', 4)
-        }
-        
-        department_match = ('Missing Item Department', 4)  # Default
-        for keyword, (dept, pri) in keywords.items():
-            if keyword in combined_text.lower():
-                department_match = (dept, pri)
-                break
-
-        description = f"{combined_text}"[:500]
-        create_alert(department_match[0], department_match[1], description, img_data, audio_data)
-        
-        return description
-
+        return True
     except Exception as e:
-        st.error(f"Error in img2txt: {str(e)}")
-        return f"Error processing image: {str(e)}"
+        logger.error(f"Error creating alert: {e}")
+        return False
 
+def get_alerts(department: str, role: str) -> List[Dict]:
+    conn = sqlite3.connect('emergency_alerts.db')
+    c = conn.cursor()
     
-def transcribe_audio(audio_bytes):
-    """Transcribe audio using Hugging Face's Whisper API"""
+    if role == 'admin':
+        c.execute('''
+            SELECT * FROM alerts 
+            WHERE status = 'active' 
+            ORDER BY 
+                CASE priority 
+                    WHEN 'high' THEN 1
+                    WHEN 'medium' THEN 2
+                    WHEN 'low' THEN 3
+                END,
+                created_at DESC
+        ''')
+    else:
+        c.execute('''
+            SELECT * FROM alerts 
+            WHERE department = ? AND status = 'active' 
+            ORDER BY 
+                CASE priority 
+                    WHEN 'high' THEN 1
+                    WHEN 'medium' THEN 2
+                    WHEN 'low' THEN 3
+                END,
+                created_at DESC
+        ''', (department,))
+    
+    alerts = []
+    for row in c.fetchall():
+        alerts.append({
+            'id': row[0],
+            'title': row[1],
+            'description': row[2],
+            'department': row[3],
+            'priority': row[4],
+            'alert_type': row[5],
+            'media_path': row[6],
+            'created_by': row[7],
+            'created_at': row[8],
+            'status': row[9],
+            'resolved_at': row[10],
+            'resolved_by': row[11]
+        })
+    
+    conn.close()
+    return alerts
+
+def get_resolved_alerts(department: str, role: str) -> List[Dict]:
+    conn = sqlite3.connect('emergency_alerts.db')
+    c = conn.cursor()
+    
+    if role == 'admin':
+        c.execute('''
+            SELECT * FROM alerts 
+            WHERE status = 'resolved' 
+            ORDER BY resolved_at DESC
+            LIMIT 50
+        ''')
+    else:
+        c.execute('''
+            SELECT * FROM alerts 
+            WHERE department = ? AND status = 'resolved' 
+            ORDER BY resolved_at DESC
+            LIMIT 50
+        ''', (department,))
+    
+    alerts = []
+    for row in c.fetchall():
+        alerts.append({
+            'id': row[0],
+            'title': row[1],
+            'description': row[2],
+            'department': row[3],
+            'priority': row[4],
+            'alert_type': row[5],
+            'media_path': row[6],
+            'created_by': row[7],
+            'created_at': row[8],
+            'status': row[9],
+            'resolved_at': row[10],
+            'resolved_by': row[11]
+        })
+    
+    conn.close()
+    return alerts
+
+def resolve_alert(alert_id: int, resolved_by: str) -> bool:
     try:
-        API_URL = "https://api-inference.huggingface.co/models/openai/whisper-large-v3"
-        headers = {
-            "Authorization": f"Bearer {st.secrets['HUGGINGFACE_TOKEN']}"
-        }
-
-        # Make API request
-        response = requests.post(
-            API_URL,
-            headers=headers,
-            data=audio_bytes
-        )
-
-        if response.status_code != 200:
-            return f"Error: API request failed with status {response.status_code}"
-
-        result = response.json()
-        return result.get('text', '')
-
-    except Exception as e:
-        return f"Error transcribing audio: {str(e)}"
-
-# Text to Speech Function
-def text_to_speech(text, file_path="output_speech.mp3"):
-    """Convert text to speech using gTTS"""
-    try:
-        tts = gTTS(text=text, lang='en', slow=False)
-        tts.save(file_path)
-        return file_path
-    except Exception as e:
-        return None
-
-
-def check_alerts(username):
-    """Retrieve and format alerts with media display"""
-    conn = sqlite3.connect('user4_database.db')
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute("SELECT department FROM users WHERE username = ?", (username,))
-        user_result = cursor.fetchone()
+        conn = sqlite3.connect('emergency_alerts.db')
+        c = conn.cursor()
         
-        if not user_result:
-            conn.close()
-            return "Error: User department not found.", []
-
-        user_department = user_result[0]
-
-        cursor.execute("""
-            SELECT id, timestamp, description, priority, status, image_data, audio_data
-            FROM alerts
-            WHERE department = ?
-            ORDER BY timestamp DESC
-        """, (user_department,))
-
-        alerts = cursor.fetchall()
-        conn.close()
-
-        if not alerts:
-            return f"No alerts found for {user_department}.", []
-
-        # Format alerts with media handling
-        formatted_alerts = []
-        output = f"🚨 {user_department.upper()} ALERTS 🚨\n\n"
-        
-        for alert in alerts:
-            alert_id, timestamp, description, priority, status, image_data, audio_data = alert
-            
-            # Create dictionary for each alert with all necessary data
-            alert_dict = {
-                'id': alert_id,
-                'timestamp': timestamp,
-                'description': description,
-                'priority': priority,
-                'status': status,
-                'image_data': image_data,
-                'audio_data': audio_data
-            }
-            formatted_alerts.append(alert_dict)
-            
-            # Add to text output
-            status_icon = "🔴" if status == "UNREAD" else "🔵"
-            output += f"{status_icon} {timestamp}\n{description}\n\n"
-
-        return output, formatted_alerts
-
-    except Exception as e:
-        return f"Error retrieving alerts: {str(e)}", []
-def clear_department_alerts(username):
-    """Completely clear all alerts for a specific department"""
-    conn = sqlite3.connect('user1_database.db')
-    cursor = conn.cursor()
-
-    try:
-        # Get user's department
-        cursor.execute("SELECT department FROM users WHERE username = ?", (username,))
-        department = cursor.fetchone()[0]
-
-        # Completely remove all alerts for the department
-        cursor.execute("DELETE FROM alerts WHERE department = ?", (department,))
+        c.execute('''
+            UPDATE alerts 
+            SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, resolved_by = ?
+            WHERE id = ?
+        ''', (resolved_by, alert_id))
         
         conn.commit()
-        rows_deleted = cursor.rowcount
-        
-        return rows_deleted, department
-
+        conn.close()
+        return True
     except Exception as e:
-        print(f"Error clearing alerts: {e}")
-        return 0, None
-# Main Streamlit App
-def main():
-    # Initialize session state and database (same as before)
-    if 'logged_in' not in st.session_state:
-        st.session_state['logged_in'] = False
-    if 'username' not in st.session_state:
-        st.session_state['username'] = None
-    if 'department' not in st.session_state:
-        st.session_state['department'] = None
+        logger.error(f"Error resolving alert: {e}")
+        return False
 
-    if 'HUGGINGFACE_TOKEN' not in st.secrets:
-        st.secrets['HUGGINGFACE_TOKEN'] = "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"
-
-    init_database()
-
-    st.title("Multimodal Alert System")
-
-    # Login section (same as before)
-    if not st.session_state.logged_in:
-        st.subheader("Login")
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
+def display_audio_player(audio_path: str):
+    """Display audio player for audio files"""
+    st.markdown("**🎤 Audio Evidence:**")
+    try:
+        with open(audio_path, 'rb') as audio_file:
+            audio_bytes = audio_file.read()
         
-        if st.button("Login"):
-            user = authenticate_user(username, password)
-            if user:
-                st.session_state.logged_in = True
-                st.session_state.username = username
-                st.session_state.department = user[2]
-                st.rerun()
-            else:
-                st.error("Invalid credentials")
-
-    # Main Interface after Login
-    if st.session_state.logged_in:
-        st.sidebar.success(f"Logged in as: {st.session_state.username}")
+        # Display audio player
+        st.audio(audio_bytes, format="audio/wav")
         
-        if st.sidebar.button("Logout"):
-            st.session_state.logged_in = False
-            st.session_state.username = None
-            st.rerun()
+        # Show file info
+        file_size = len(audio_bytes) / (1024 * 1024)  # Convert to MB
+        file_name = os.path.basename(audio_path)
+        st.caption(f"Audio file: `{file_name}` ({file_size:.2f} MB)")
+        
+    except Exception as e:
+        st.error(f"Error loading audio: {e}")
+        # Debug information
+        st.write(f"Audio path: {audio_path}")
+        st.write(f"File exists: {os.path.exists(audio_path)}")
 
-        tab1, tab2 = st.tabs(["Alert Generation", "Check Alerts"])
-
-        with tab1:
-            # [Alert Generation tab code remains the same]
-            st.subheader("Generate Alert")
-            
-            # Image Input
-            st.markdown("### Upload Image")
-            image_file = st.file_uploader(
-                "Take a photo or choose from gallery", 
-                type=['png', 'jpg', 'jpeg'],
-                accept_multiple_files=False,
-                help="Select image from gallery or take a photo"
-            )
-            
-            # Audio Input
-            st.markdown("### Upload Audio")
-            audio_file = st.file_uploader(
-                "Record audio or choose from gallery",
-                type=['wav', 'mp3'],
-                accept_multiple_files=False,
-                help="Select audio from device or record"
-            )
-            
-            # Additional Context
-            additional_context = st.text_area(
-                "Additional Context",
-                placeholder="Add location, address, or any other relevant details...",
-                help="This information will be included in the alert description"
-            )
-            
-            if st.button("Process Inputs", type="primary"):
-                speech_text = ""
-                audio_data = None
-                if audio_file:
-                    audio_data = audio_file.read()
-                    speech_text = transcribe_audio(audio_data)
-                    st.write("Speech to Text:", speech_text)
-                
-                if image_file:
-                    image = Image.open(image_file)
-                    st.image(image, caption="Uploaded Image", use_column_width=True)
-                    
-                    alert_description = img2txt(
-                        speech_text, 
-                        image,
-                        audio_data,
-                        additional_context
-                    )
-                    st.write("Alert Description:", alert_description)
-                    
-                    if audio_data:
-                        st.audio(audio_data)
-
-        with tab2:
-            st.subheader("Department Alerts")
-            
-            # Create two columns for buttons
+def display_media(alert: Dict):
+    """Display media evidence for an alert"""
+    if alert.get('media_path'):
+        # Split media paths by comma and handle each one
+        media_files = alert['media_path'].split(',')
+        
+        # Debug information (can be commented out in production)
+        # st.write(f"Media files found: {media_files}")
+        
+        # Create columns for better layout when both types exist
+        has_photo = any('image:' in media_file for media_file in media_files)
+        has_audio = any('audio:' in media_file for media_file in media_files)
+        
+        if has_photo and has_audio:
             col1, col2 = st.columns(2)
-            
-            # Retrieve Alerts button in first column
-            with col1:
-                retrieve_button = st.button("Retrieve Alerts", key="retrieve_alerts")
-            
-            # Clear Alerts button and confirmation in second column
-            with col2:
-                clear_confirmation = st.checkbox("Confirm Alert Deletion", key="clear_confirm")
-                if clear_confirmation:
-                    if st.button("Clear All Department Alerts", type="primary", key="clear_alerts"):
-                        rows_deleted, department = clear_department_alerts(st.session_state.username)
-                        if rows_deleted > 0:
-                            st.success(f"Successfully cleared {rows_deleted} alerts for {department}.")
-                        else:
-                            st.info(f"No alerts to clear for {department}.")
-                        # Force refresh of alerts display
-                        retrieve_button = True
-
-            # Display alerts if retrieve button is clicked
-            if retrieve_button:
-                alerts_text, formatted_alerts = check_alerts(st.session_state.username)
-                
-                if not formatted_alerts:
-                    st.info("No alerts found for your department.")
+        else:
+            # Use a single column layout
+            col1 = st.container()
+            col2 = None
+        
+        for media_file in media_files:
+            # Clean the path by removing the type prefix
+            if media_file.startswith('image:'):
+                image_path = media_file.replace('image:', '')
+                if os.path.exists(image_path):
+                    if has_photo and has_audio:
+                        with col1:
+                            st.markdown("**📷 Photo Evidence:**")
+                            try:
+                                image = Image.open(image_path)
+                                st.image(image, caption="Incident Photo", use_column_width=True)
+                            except Exception as e:
+                                st.error(f"Error loading image: {e}")
+                    else:
+                        st.markdown("**📷 Photo Evidence:**")
+                        try:
+                            image = Image.open(image_path)
+                            st.image(image, caption="Incident Photo", use_column_width=True)
+                        except Exception as e:
+                            st.error(f"Error loading image: {e}")
                 else:
-                    for alert in formatted_alerts:
-                        st.markdown(f"### Alert {alert['id']} - {alert['timestamp']}")
-                        st.write(alert['description'])
-                        
-                        # Display image if available
-                        if alert['image_data']:
-                            try:
-                                image = Image.open(io.BytesIO(alert['image_data']))
-                                st.image(image, caption=f"Alert {alert['id']} Image", use_column_width=True)
-                            except Exception as e:
-                                st.error(f"Error displaying image: {e}")
-                        
-                        # Display audio if available
-                        if alert['audio_data']:
-                            try:
-                                st.audio(alert['audio_data'])
-                            except Exception as e:
-                                st.error(f"Error playing audio: {e}")
-                        
-                        st.markdown("---")
+                    st.warning(f"Photo file not found: {image_path}")
+            
+            elif media_file.startswith('audio:'):
+                audio_path = media_file.replace('audio:', '')
+                if os.path.exists(audio_path):
+                    if has_photo and has_audio:
+                        with col2:
+                            display_audio_player(audio_path)
+                    else:
+                        display_audio_player(audio_path)
+                else:
+                    st.warning(f"Audio file not found: {audio_path}")
+            
+            # Handle case where media path doesn't have prefix (backward compatibility)
+            elif os.path.exists(media_file):
+                # Try to determine file type by extension
+                if media_file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
+                    st.markdown("**📷 Photo Evidence:**")
+                    try:
+                        image = Image.open(media_file)
+                        st.image(image, caption="Incident Photo", use_column_width=True)
+                    except Exception as e:
+                        st.error(f"Error loading image: {e}")
+                elif media_file.lower().endswith(('.wav', '.mp3', '.m4a', '.ogg')):
+                    display_audio_player(media_file)
+                else:
+                    st.warning(f"Unknown file type: {media_file}")
 
-# Run the app
+# HTML for audio recording
+def audio_recorder_html():
+    return """
+    <div style="text-align: center; padding: 20px;">
+        <button class="mic-button" id="startRecord">🎤</button>
+        <div style="margin: 10px 0; color: white;" id="status">Click mic to start recording</div>
+        <audio id="audioPlayback" controls style="margin: 10px 0; display: none;"></audio>
+        <div id="timer" style="color: white; font-size: 1.2rem; margin: 10px 0;">00:00</div>
+    </div>
+
+    <script>
+    let mediaRecorder;
+    let audioChunks = [];
+    let isRecording = false;
+    let startTime;
+    let timerInterval;
+
+    const startRecordButton = document.getElementById('startRecord');
+    const statusDiv = document.getElementById('status');
+    const audioPlayback = document.getElementById('audioPlayback');
+    const timerDiv = document.getElementById('timer');
+
+    function updateTimer() {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
+        const seconds = (elapsed % 60).toString().padStart(2, '0');
+        timerDiv.textContent = `${minutes}:${seconds}`;
+    }
+
+    startRecordButton.addEventListener('click', async () => {
+        if (!isRecording) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    audioPlayback.src = audioUrl;
+                    audioPlayback.style.display = 'block';
+
+                    // Convert blob to base64 for Streamlit
+                    const reader = new FileReader();
+                    reader.readAsDataURL(audioBlob);
+                    reader.onloadend = () => {
+                        const base64data = reader.result;
+                        // Send to Streamlit
+                        window.parent.postMessage({
+                            type: 'audioRecorded',
+                            audioData: base64data
+                        }, '*');
+                    };
+                };
+
+                mediaRecorder.start();
+                isRecording = true;
+                startRecordButton.classList.add('recording');
+                startRecordButton.innerHTML = '⏹️';
+                statusDiv.textContent = 'Recording... Click to stop';
+                
+                // Start timer
+                startTime = Date.now();
+                timerInterval = setInterval(updateTimer, 1000);
+
+            } catch (err) {
+                statusDiv.textContent = 'Error: Cannot access microphone';
+                console.error('Error accessing microphone:', err);
+            }
+        } else {
+            // Stop recording
+            mediaRecorder.stop();
+            isRecording = false;
+            startRecordButton.classList.remove('recording');
+            startRecordButton.innerHTML = '🎤';
+            statusDiv.textContent = 'Recording complete';
+            
+            // Stop timer
+            clearInterval(timerInterval);
+            
+            // Stop all tracks
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+        }
+    });
+    </script>
+    """
+
+def main():
+    st.set_page_config(
+        page_title="Emergency Alert System",
+        page_icon="🚨",
+        layout="wide",
+        initial_sidebar_state="collapsed"
+    )
+    
+    inject_custom_css()
+    init_db()
+    
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
+    if 'user_info' not in st.session_state:
+        st.session_state.user_info = None
+    if 'current_page' not in st.session_state:
+        st.session_state.current_page = 'login'
+    if 'recorded_audio_path' not in st.session_state:
+        st.session_state.recorded_audio_path = None
+    if 'audio_recorded' not in st.session_state:
+        st.session_state.audio_recorded = False
+    if 'audio_data' not in st.session_state:
+        st.session_state.audio_data = None
+    
+    # Handle audio recording messages from JavaScript
+    if st.session_state.get('audio_recorded') and st.session_state.get('audio_data'):
+        try:
+            audio_data = st.session_state.audio_data
+            # Convert base64 to bytes and save immediately
+            audio_bytes = base64.b64decode(audio_data.split(',')[1])
+            media_path = save_audio_file(audio_bytes)
+            st.session_state.recorded_audio_path = media_path
+            st.session_state.audio_recorded = False
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error processing audio recording: {e}")
+            logger.error(f"Audio processing error: {e}")
+    
+    if not st.session_state.authenticated:
+        render_login_page()
+        return
+    
+    render_main_application()
+
+def render_login_page():
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown('<div class="main-header">Emergency Response System</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">Enterprise Incident Management Platform</div>', unsafe_allow_html=True)
+        
+        with st.container():
+            st.markdown("### Secure Access")
+            with st.form("login_form"):
+                username = st.text_input("Username", placeholder="Enter your username")
+                password = st.text_input("Password", type="password", placeholder="Enter your password")
+                submit = st.form_submit_button("Authenticate", use_container_width=True)
+                
+                if submit:
+                    if username and password:
+                        user_info = authenticate_user(username, password)
+                        if user_info:
+                            st.session_state.authenticated = True
+                            st.session_state.user_info = user_info
+                            st.session_state.current_page = 'dashboard'
+                            st.rerun()
+                        else:
+                            st.error("Invalid credentials")
+                    else:
+                        st.error("Please enter both username and password")
+            
+            st.markdown("---")
+            st.markdown("**Default Access Credentials**")
+            cols = st.columns(2)
+            with cols[0]:
+                st.info("""
+                **Fire Department**  
+                `fire_head` / `fire123`
+                
+                **Health Care**  
+                `health_head` / `health123`
+                """)
+            with cols[1]:
+                st.info("""
+                **Equipment Damage**  
+                `equipment_head` / `equipment123`
+                
+                **Missing Items**  
+                `missing_head` / `missing123`
+                """)
+            st.info("**Administrator:** `admin` / `admin123`")
+
+def render_main_application():
+    user_info = st.session_state.user_info
+    
+    with st.sidebar:
+        st.markdown('<div class="sidebar-header">Emergency Response System</div>', unsafe_allow_html=True)
+        
+        st.markdown('<div class="user-info">', unsafe_allow_html=True)
+        st.markdown(f"**{user_info['username']}**")
+        st.markdown(f"*{user_info['department']} Department*")
+        st.markdown(f"Role: {user_info['role'].title()}")
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown('<div class="nav-section">', unsafe_allow_html=True)
+        if st.button("📊 Dashboard", use_container_width=True):
+            st.session_state.current_page = 'dashboard'
+        if st.button("🚨 Report Incident", use_container_width=True):
+            st.session_state.current_page = 'report_emergency'
+        if st.button("📋 Active Alerts", use_container_width=True):
+            st.session_state.current_page = 'view_alerts'
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown("---")
+        if st.button("🚪 Sign Out", use_container_width=True):
+            st.session_state.authenticated = False
+            st.session_state.user_info = None
+            st.rerun()
+    
+    if st.session_state.current_page == 'dashboard':
+        render_dashboard()
+    elif st.session_state.current_page == 'report_emergency':
+        render_report_emergency()
+    elif st.session_state.current_page == 'view_alerts':
+        render_view_alerts()
+
+def render_dashboard():
+    st.markdown('<div class="main-header">Incident Dashboard</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Real-time emergency monitoring and management</div>', unsafe_allow_html=True)
+    
+    user_info = st.session_state.user_info
+    alerts = get_alerts(user_info['department'], user_info['role'])
+    
+    # Statistics Cards
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<div class="metric-label">Total Active</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-value">{len(alerts)}</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        high_priority = len([a for a in alerts if a['priority'] == 'high'])
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<div class="metric-label">Critical</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-value">{high_priority}</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col3:
+        medium_priority = len([a for a in alerts if a['priority'] == 'medium'])
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<div class="metric-label">Urgent</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-value">{medium_priority}</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col4:
+        low_priority = len([a for a in alerts if a['priority'] == 'low'])
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<div class="metric-label">Routine</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-value">{low_priority}</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # Active Alerts Section
+    st.markdown("### Active Incidents")
+    
+    if not alerts:
+        st.info("No active incidents reported.")
+        return
+    
+    for alert in alerts:
+        priority_class = f"card-{alert['priority']}"
+        priority_icons = {'high': '🔴', 'medium': '🟡', 'low': '🟢'}
+        
+        st.markdown(f'<div class="alert-card {priority_class}">', unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([4, 1])
+        
+        with col1:
+            st.markdown(f"#### {priority_icons[alert['priority']]} {alert['title']}")
+            st.markdown(f"**Description:** {alert['description']}")
+            st.markdown(f"**Department:** {alert['department']} • **Type:** {alert['alert_type'].title()}")
+            st.markdown(f"*Reported by {alert['created_by']} at {alert['created_at'][:16]}*")
+            
+            # Add expandable evidence section in dashboard too
+            with st.expander("View Evidence"):
+                display_media(alert)
+        
+        with col2:
+            if st.button("Resolve", key=f"resolve_{alert['id']}", use_container_width=True):
+                if resolve_alert(alert['id'], user_info['username']):
+                    st.success("Incident resolved")
+                    st.rerun()
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+
+def render_report_emergency():
+    st.markdown('<div class="main-header">Report Emergency</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Submit incident report with multimedia evidence</div>', unsafe_allow_html=True)
+    
+    user_info = st.session_state.user_info
+    
+    # Initialize session state for audio recording
+    if 'audio_recorded' not in st.session_state:
+        st.session_state.audio_recorded = False
+    if 'recorded_audio_path' not in st.session_state:
+        st.session_state.recorded_audio_path = None
+    
+    # Two-column layout for media upload
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### Visual Evidence")
+        uploaded_image = st.file_uploader("Upload incident photo", 
+                                        type=['jpg', 'jpeg', 'png'],
+                                        help="Upload clear photos of the incident scene")
+    
+    with col2:
+        st.markdown("### Audio Evidence")
+        
+        # Audio recording section
+        st.markdown("#### Record Live Audio")
+        st.components.v1.html(audio_recorder_html(), height=300)
+        
+        # Handle recorded audio from JavaScript
+        if st.session_state.get('audio_recorded'):
+            audio_data = st.session_state.audio_data
+            # Convert base64 to bytes and save immediately
+            audio_bytes = base64.b64decode(audio_data.split(',')[1])
+            media_path = save_audio_file(audio_bytes)
+            st.session_state.recorded_audio_path = media_path
+            st.session_state.audio_recorded = False
+            st.success("Audio recording saved successfully!")
+        
+        # Display and manage recorded audio
+        if st.session_state.get('recorded_audio_path'):
+            st.markdown("#### Current Recording")
+            with open(st.session_state.recorded_audio_path, 'rb') as audio_file:
+                audio_bytes = audio_file.read()
+            st.audio(audio_bytes, format="audio/wav")
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("Use This Recording", key="use_recording"):
+                    st.success("Recording will be used in report")
+            with col_b:
+                if st.button("Delete Recording", key="delete_recording"):
+                    try:
+                        os.remove(st.session_state.recorded_audio_path)
+                        del st.session_state.recorded_audio_path
+                        st.rerun()
+                    except:
+                        st.error("Error deleting recording")
+        
+        st.markdown("#### Or Upload Audio File")
+        uploaded_audio = st.file_uploader("Upload audio file", 
+                                        type=['wav', 'mp3', 'm4a'],
+                                        help="Upload pre-recorded audio file")
+    
+    # Preview section
+    if uploaded_image or st.session_state.get('recorded_audio_path') or uploaded_audio:
+        st.markdown("### Evidence Preview")
+        preview_col1, preview_col2 = st.columns(2)
+        
+        with preview_col1:
+            if uploaded_image:
+                image = Image.open(uploaded_image)
+                st.image(image, caption="Incident Photo", use_column_width=True)
+        
+        with preview_col2:
+            if st.session_state.get('recorded_audio_path'):
+                with open(st.session_state.recorded_audio_path, 'rb') as audio_file:
+                    audio_bytes = audio_file.read()
+                st.audio(audio_bytes, format="audio/wav")
+                st.markdown("*Live Recording Preview*")
+            elif uploaded_audio:
+                st.audio(uploaded_audio, format="audio/wav")
+                st.markdown("*Uploaded Audio Preview*")
+    
+    # Incident Report Form
+    st.markdown("### Incident Details")
+    
+    with st.form("emergency_alert_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            title = st.text_input("Incident Title*", 
+                                placeholder="Brief descriptive title")
+        
+        with col2:
+            departments = ["Fire", "Health Care", "Equipment Damage", "Missing Items", "General"]
+            selected_department = st.selectbox(
+                "Responsible Department*",
+                departments
+            )
+        
+        description = st.text_area("Incident Description*",
+                                 placeholder="Provide detailed description of the incident",
+                                 height=100)
+        
+        submitted = st.form_submit_button("Submit Incident Report", use_container_width=True)
+        
+        if submitted:
+            if title and selected_department and description:
+                has_media = uploaded_image or st.session_state.get('recorded_audio_path') or uploaded_audio
+                if not has_media:
+                    st.error("Please provide at least one piece of evidence (photo or audio)")
+                else:
+                    with st.spinner("Processing incident report..."):
+                        # Determine media type
+                        media_types = []
+                        if uploaded_image:
+                            media_types.append("photo")
+                        if st.session_state.get('recorded_audio_path') or uploaded_audio:
+                            media_types.append("audio")
+                        
+                        alert_type = " + ".join(media_types) if len(media_types) > 1 else media_types[0] if media_types else "media"
+                        
+                        # Save media files
+                        media_paths = []
+                        
+                        if uploaded_image:
+                            image_path = save_uploaded_file(uploaded_image, "image")
+                            media_paths.append(f"image:{image_path}")
+                        
+                        # Priority: Use recorded audio first, then uploaded audio
+                        if st.session_state.get('recorded_audio_path'):
+                            media_paths.append(f"audio:{st.session_state.recorded_audio_path}")
+                        elif uploaded_audio:
+                            audio_path = save_uploaded_file(uploaded_audio, "audio")
+                            media_paths.append(f"audio:{audio_path}")
+                        
+                        media_path = ",".join(media_paths) if media_paths else None
+                        
+                        alert_data = {
+                            'title': title,
+                            'description': description,
+                            'department': selected_department,
+                            'priority': "high",
+                            'alert_type': alert_type,
+                            'media_path': media_path,
+                            'created_by': user_info['username']
+                        }
+                        
+                        if create_alert(alert_data):
+                            st.success("Incident report submitted successfully")
+                            st.balloons()
+                            # Clear recorded audio after successful submission
+                            if 'recorded_audio_path' in st.session_state:
+                                del st.session_state.recorded_audio_path
+                            if 'audio_recorded' in st.session_state:
+                                del st.session_state.audio_recorded
+                            if 'audio_data' in st.session_state:
+                                del st.session_state.audio_data
+                        else:
+                            st.error("Error submitting incident report")
+            else:
+                st.error("Please complete all required fields")
+
+def render_view_alerts():
+    st.markdown('<div class="main-header">Incident Management</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Manage and monitor emergency situations</div>', unsafe_allow_html=True)
+    
+    user_info = st.session_state.user_info
+    
+    # Create tabs for Active and Resolved incidents
+    tab1, tab2 = st.tabs(["🚨 Active Incidents", "📋 Resolved Cases"])
+    
+    with tab1:
+        st.markdown("### Active Incidents")
+        active_alerts = get_alerts(user_info['department'], user_info['role'])
+        
+        if not active_alerts:
+            st.info("No active incidents in your department.")
+        else:
+            for alert in active_alerts:
+                priority_class = f"card-{alert['priority']}"
+                priority_icons = {'high': '🔴 Critical', 'medium': '🟡 Urgent', 'low': '🟢 Routine'}
+                
+                st.markdown(f'<div class="alert-card {priority_class}">', unsafe_allow_html=True)
+                
+                col1, col2 = st.columns([4, 1])
+                
+                with col1:
+                    st.markdown(f"#### {alert['title']}")
+                    st.markdown(f"**{priority_icons[alert['priority']]}** • **Department:** {alert['department']}")
+                    st.markdown(f"**Description:** {alert['description']}")
+                    st.markdown(f"**Evidence Type:** {alert['alert_type'].title()}")
+                    st.markdown(f"*Reported by {alert['created_by']} • {alert['created_at'][:16]}*")
+                    
+                    # Expandable media section
+                    with st.expander("View Evidence Details"):
+                        # Temporary debug info (can be removed in production)
+                        if st.checkbox("Show debug info", key=f"debug_{alert['id']}"):
+                            st.write(f"Media path: {alert.get('media_path')}")
+                            st.write(f"Media files: {alert.get('media_path', '').split(',') if alert.get('media_path') else []}")
+                        
+                        display_media(alert)
+                
+                with col2:
+                    if st.button("Resolve Incident", key=f"resolve_{alert['id']}", use_container_width=True):
+                        if resolve_alert(alert['id'], user_info['username']):
+                            st.success("Incident resolved")
+                            st.rerun()
+                
+                st.markdown('</div>', unsafe_allow_html=True)
+    
+    with tab2:
+        st.markdown("### Previously Resolved Cases")
+        resolved_alerts = get_resolved_alerts(user_info['department'], user_info['role'])
+        
+        if not resolved_alerts:
+            st.info("No resolved incidents found.")
+        else:
+            # Add filter options for resolved cases
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                department_filter = st.selectbox(
+                    "Filter by Department",
+                    ["All"] + list(set([alert['department'] for alert in resolved_alerts])),
+                    key="resolved_dept_filter"
+                )
+            with col2:
+                priority_filter = st.selectbox(
+                    "Filter by Priority",
+                    ["All", "high", "medium", "low"],
+                    key="resolved_priority_filter"
+                )
+            with col3:
+                date_sort = st.selectbox(
+                    "Sort by Date",
+                    ["Newest First", "Oldest First"],
+                    key="resolved_date_sort"
+                )
+            
+            # Apply filters
+            filtered_alerts = resolved_alerts
+            
+            if department_filter != "All":
+                filtered_alerts = [alert for alert in filtered_alerts if alert['department'] == department_filter]
+            
+            if priority_filter != "All":
+                filtered_alerts = [alert for alert in filtered_alerts if alert['priority'] == priority_filter]
+            
+            if date_sort == "Oldest First":
+                filtered_alerts = sorted(filtered_alerts, key=lambda x: x['resolved_at'] or x['created_at'])
+            else:
+                filtered_alerts = sorted(filtered_alerts, key=lambda x: x['resolved_at'] or x['created_at'], reverse=True)
+            
+            for alert in filtered_alerts:
+                priority_class = f"card-{alert['priority']}"
+                priority_icons = {'high': '🔴 Critical', 'medium': '🟡 Urgent', 'low': '🟢 Routine'}
+                
+                st.markdown(f'<div class="alert-card {priority_class}">', unsafe_allow_html=True)
+                
+                st.markdown(f"#### {alert['title']}")
+                st.markdown(f"**{priority_icons[alert['priority']]}** • **Department:** {alert['department']}")
+                st.markdown(f"**Description:** {alert['description']}")
+                st.markdown(f"**Evidence Type:** {alert['alert_type'].title()}")
+                st.markdown(f"*Reported by {alert['created_by']} • {alert['created_at'][:16]}*")
+                st.markdown(f"**Resolved by {alert['resolved_by']} • {alert['resolved_at'][:16] if alert['resolved_at'] else 'Unknown'}**")
+                
+                # Expandable media section for resolved cases too
+                with st.expander("View Evidence Details"):
+                    display_media(alert)
+                
+                st.markdown('</div>', unsafe_allow_html=True)
+
 if __name__ == "__main__":
     main()
