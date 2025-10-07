@@ -181,27 +181,62 @@ def inject_custom_css():
             color: #ffffff !important;
         }
         
-        /* File uploader styling */
+        /* File uploader styling - COMPLETELY FIXED */
         .stFileUploader {
-            border: 2px dashed #555;
-            border-radius: 12px;
-            padding: 2rem;
-            text-align: center;
-            transition: border-color 0.3s ease;
+            border: 2px dashed #555 !important;
+            border-radius: 12px !important;
+            padding: 2rem !important;
+            text-align: center !important;
+            transition: border-color 0.3s ease !important;
             background: #1a1d24 !important;
         }
         
         .stFileUploader:hover {
-            border-color: #667eea;
+            border-color: #667eea !important;
         }
         
-        /* Fix file uploader text color */
+        /* Fix file uploader text color - COMPREHENSIVE FIX */
         .stFileUploader section {
-            color: #ffffff !important;
             background: #1a1d24 !important;
+            border: none !important;
         }
         
         .stFileUploader section div {
+            color: #ffffff !important;
+        }
+        
+        .stFileUploader section p {
+            color: #ffffff !important;
+        }
+        
+        .stFileUploader section span {
+            color: #ffffff !important;
+        }
+        
+        .stFileUploader section small {
+            color: #cccccc !important;
+        }
+        
+        /* Fix the drag and drop text specifically */
+        .stFileUploader section div[data-testid="stFileUploader"] {
+            color: #ffffff !important;
+        }
+        
+        /* Fix the browse files button */
+        .stFileUploader section button {
+            background: #667eea !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 8px !important;
+            padding: 0.5rem 1rem !important;
+        }
+        
+        .stFileUploader section button:hover {
+            background: #764ba2 !important;
+        }
+        
+        /* Fix the uploaded file name text */
+        .stFileUploader section a {
             color: #ffffff !important;
         }
         
@@ -415,9 +450,25 @@ def inject_custom_css():
         .st-bh, .st-bi, .st-bj, .st-bk, .st-bl, .st-bm, .st-bn, .st-bo, .st-bp, .st-bq, .st-br, .st-bs, .st-bt, .st-bu, .st-bv, .st-bw, .st-bx, .st-by, .st-bz {
             color: #ffffff !important;
         }
+        
+        /* Specific fix for file uploader dropzone text */
+        div[data-testid="stFileUploader"] > div > section > div > div > div > span {
+            color: #ffffff !important;
+        }
+        
+        /* Fix the "Drag and drop file here" text */
+        div[data-testid="stFileUploader"] > div > section > div > div > div {
+            color: #ffffff !important;
+        }
+        
+        /* Fix the file size limit text */
+        div[data-testid="stFileUploader"] > div > section > div > div > small {
+            color: #cccccc !important;
+        }
         </style>
     """, unsafe_allow_html=True)
 
+# ... (rest of the code remains exactly the same as in the previous version)
 # Initialize database with migration support
 def init_db():
     conn = sqlite3.connect('emergency_alerts.db')
