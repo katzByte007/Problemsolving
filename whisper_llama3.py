@@ -126,20 +126,37 @@ def inject_custom_css():
             color: white !important;
         }
         
-        /* Button styling */
+        /* Button styling - FIXED ALL BUTTONS */
         .stButton button {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
             color: white !important;
-            border: none;
-            padding: 0.5rem 2rem;
-            border-radius: 8px;
-            font-weight: 500;
-            transition: all 0.3s ease;
+            border: none !important;
+            padding: 0.5rem 2rem !important;
+            border-radius: 8px !important;
+            font-weight: 500 !important;
+            transition: all 0.3s ease !important;
         }
         
         .stButton button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+            transform: translateY(-1px) !important;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4) !important;
+        }
+        
+        /* Form submit buttons */
+        .stFormSubmitButton button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            color: white !important;
+            border: none !important;
+            padding: 0.75rem 2rem !important;
+            border-radius: 8px !important;
+            font-weight: 600 !important;
+            font-size: 1rem !important;
+            width: 100% !important;
+        }
+        
+        .stFormSubmitButton button:hover {
+            transform: translateY(-1px) !important;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4) !important;
         }
         
         /* Form styling */
@@ -179,6 +196,25 @@ def inject_custom_css():
             border-radius: 8px;
             margin: 1rem 0;
             color: #ffffff !important;
+        }
+        
+        /* Sidebar button styling */
+        [data-testid="stSidebar"] .stButton button {
+            background: rgba(255,255,255,0.1) !important;
+            color: white !important;
+            border: 1px solid rgba(255,255,255,0.2) !important;
+            padding: 0.75rem 1rem !important;
+            border-radius: 8px !important;
+            font-weight: 500 !important;
+            text-align: left !important;
+            width: 100% !important;
+            margin: 0.25rem 0 !important;
+        }
+        
+        [data-testid="stSidebar"] .stButton button:hover {
+            background: rgba(255,255,255,0.2) !important;
+            border-color: rgba(255,255,255,0.3) !important;
+            transform: translateY(-1px) !important;
         }
         
         /* File uploader styling - COMPLETELY FIXED */
@@ -465,10 +501,86 @@ def inject_custom_css():
         div[data-testid="stFileUploader"] > div > section > div > div > small {
             color: #cccccc !important;
         }
+        
+        /* Fix sidebar collapse button */
+        [data-testid="collapsedControl"] {
+            color: #ffffff !important;
+            background: #1a1d24 !important;
+            border: 1px solid #444 !important;
+        }
+        
+        [data-testid="collapsedControl"]:hover {
+            background: #2d3748 !important;
+        }
+        
+        /* Fix login form submit button */
+        .stForm {
+            border: none !important;
+        }
+        
+        .stForm .stButton button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            color: white !important;
+            border: none !important;
+            padding: 0.75rem 2rem !important;
+            border-radius: 8px !important;
+            font-weight: 600 !important;
+            font-size: 1rem !important;
+            width: 100% !important;
+            margin-top: 1rem !important;
+        }
+        
+        .stForm .stButton button:hover {
+            transform: translateY(-1px) !important;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4) !important;
+        }
+        
+        /* Fix all other buttons in main content */
+        div[data-testid="stVerticalBlock"] .stButton button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            color: white !important;
+            border: none !important;
+            padding: 0.5rem 1.5rem !important;
+            border-radius: 8px !important;
+            font-weight: 500 !important;
+        }
+        
+        div[data-testid="stVerticalBlock"] .stButton button:hover {
+            transform: translateY(-1px) !important;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4) !important;
+        }
+        
+        /* Fix resolve buttons in alert cards */
+        .alert-card .stButton button {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+            color: white !important;
+            border: none !important;
+            padding: 0.5rem 1rem !important;
+            border-radius: 6px !important;
+            font-weight: 500 !important;
+            font-size: 0.9rem !important;
+        }
+        
+        .alert-card .stButton button:hover {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%) !important;
+            transform: translateY(-1px) !important;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4) !important;
+        }
+        
+        /* Fix the sign out button */
+        [data-testid="stSidebar"] .stButton button[kind="secondary"] {
+            background: rgba(239, 68, 68, 0.8) !important;
+            color: white !important;
+            border: 1px solid rgba(239, 68, 68, 0.5) !important;
+        }
+        
+        [data-testid="stSidebar"] .stButton button[kind="secondary"]:hover {
+            background: rgba(239, 68, 68, 1) !important;
+            border-color: rgba(239, 68, 68, 0.8) !important;
+        }
         </style>
     """, unsafe_allow_html=True)
 
-# ... (rest of the code remains exactly the same as in the previous version)
 # Initialize database with migration support
 def init_db():
     conn = sqlite3.connect('emergency_alerts.db')
@@ -979,7 +1091,7 @@ def render_login_page():
             with st.form("login_form"):
                 username = st.text_input("Username", placeholder="Enter your username")
                 password = st.text_input("Password", type="password", placeholder="Enter your password")
-                submit = st.form_submit_button("Authenticate", use_container_width=True)
+                submit = st.form_submit_button("🚪 Authenticate", use_container_width=True)
                 
                 if submit:
                     if username and password:
@@ -1138,7 +1250,7 @@ def render_dashboard():
         with col2:
             # Only show resolve button for department heads and admin
             if user_info['role'] in ['department_head', 'admin']:
-                if st.button("Resolve", key=f"resolve_{alert['id']}", use_container_width=True):
+                if st.button("✅ Resolve", key=f"resolve_{alert['id']}", use_container_width=True):
                     if resolve_alert(alert['id'], user_info['username']):
                         st.success("Incident resolved")
                         st.rerun()
@@ -1206,10 +1318,10 @@ def render_report_emergency():
             
             col_a, col_b = st.columns(2)
             with col_a:
-                if st.button("Use This Recording", key="use_recording"):
+                if st.button("✅ Use This Recording", key="use_recording"):
                     st.success("Recording will be used in report")
             with col_b:
-                if st.button("Delete Recording", key="delete_recording"):
+                if st.button("🗑️ Delete Recording", key="delete_recording"):
                     try:
                         os.remove(st.session_state.recorded_audio_path)
                         del st.session_state.recorded_audio_path
@@ -1272,7 +1384,7 @@ def render_report_emergency():
                                  placeholder="Provide detailed description of the incident including what happened, people involved, and immediate risks",
                                  height=100)
         
-        submitted = st.form_submit_button("Submit Incident Report", use_container_width=True)
+        submitted = st.form_submit_button("🚨 Submit Incident Report", use_container_width=True)
         
         if submitted:
             if location and department and description:
@@ -1386,12 +1498,12 @@ def render_view_alerts():
                 with col2:
                     # Only show resolve button for department heads and admin
                     if user_info['role'] in ['department_head', 'admin']:
-                        if st.button("Resolve Incident", key=f"resolve_{alert['id']}", use_container_width=True):
+                        if st.button("✅ Resolve Incident", key=f"resolve_{alert['id']}", use_container_width=True):
                             if resolve_alert(alert['id'], user_info['username']):
                                 st.success("Incident resolved")
                                 st.rerun()
                     else:
-                        st.info("Pending Resolution")
+                        st.info("⏳ Pending Resolution")
                         st.caption("Department Head Action Required")
                 
                 st.markdown('</div>', unsafe_allow_html=True)
